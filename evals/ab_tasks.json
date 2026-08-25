@@ -1,0 +1,44 @@
+[
+  {
+    "id": "invoice-total",
+    "class": "simple",
+    "scores": {"complexity": 1, "scope": 1, "reasoning": 1, "risk": 0, "context": 0, "iteration": 0},
+    "prompt": "Return only valid JSON with no markdown: {\"answer\": NUMBER}. Calculate the total for 3 units at 19, 4 units at 8, and 2 units at 15.",
+    "expected": {"answer": 119}
+  },
+  {
+    "id": "filter-sort",
+    "class": "simple",
+    "scores": {"complexity": 1, "scope": 1, "reasoning": 1, "risk": 0, "context": 1, "iteration": 0},
+    "prompt": "Return only valid JSON with no markdown: {\"names\": [STRING]}. From [{\"name\":\"Ana\",\"active\":true,\"score\":82},{\"name\":\"Bo\",\"active\":false,\"score\":95},{\"name\":\"Lin\",\"active\":true,\"score\":91},{\"name\":\"Mia\",\"active\":true,\"score\":79}], select active users with score at least 80 and sort by score descending.",
+    "expected": {"names": ["Lin", "Ana"]}
+  },
+  {
+    "id": "snake-to-camel",
+    "class": "simple",
+    "scores": {"complexity": 1, "scope": 1, "reasoning": 1, "risk": 0, "context": 0, "iteration": 0},
+    "prompt": "Return only valid JSON with no markdown: {\"values\": [STRING]}. Convert these snake_case identifiers to lowerCamelCase without changing a one-word identifier: user_id, http_status_code, x.",
+    "expected": {"values": ["userId", "httpStatusCode", "x"]}
+  },
+  {
+    "id": "debug-off-by-one",
+    "class": "debugging",
+    "scores": {"complexity": 3, "scope": 1, "reasoning": 4, "risk": 1, "context": 2, "iteration": 3},
+    "prompt": "Return only valid JSON with no markdown: {\"bug\": STRING, \"result\": NUMBER}. Debug this Python function: def total(values):\n    result = 0\n    for i in range(len(values) - 1):\n        result += values[i]\n    return result\nUse the bug code OFF_BY_ONE and give the corrected result for [3,5,7].",
+    "expected": {"bug": "OFF_BY_ONE", "result": 15}
+  },
+  {
+    "id": "shortest-path",
+    "class": "reasoning",
+    "scores": {"complexity": 3, "scope": 1, "reasoning": 4, "risk": 0, "context": 2, "iteration": 2},
+    "prompt": "Return only valid JSON with no markdown: {\"path\": [STRING], \"cost\": NUMBER}. Find the shortest path from A to D in this undirected weighted graph: A-B=4, A-C=2, C-B=1, B-D=5, C-D=8.",
+    "expected": {"path": ["A", "C", "B", "D"], "cost": 8}
+  },
+  {
+    "id": "security-review",
+    "class": "risk",
+    "scores": {"complexity": 3, "scope": 1, "reasoning": 4, "risk": 5, "context": 2, "iteration": 2},
+    "prompt": "Return only valid JSON with no markdown: {\"issues\": [STRING]}. Review: query = f\"SELECT * FROM users WHERE email = '{email}'\"; logger.info(f\"login password={password}\"). Return exactly these applicable standardized issue codes in this order: SQL_INJECTION, SECRET_LOGGING.",
+    "expected": {"issues": ["SQL_INJECTION", "SECRET_LOGGING"]}
+  }
+]

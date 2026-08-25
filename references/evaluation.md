@@ -17,6 +17,8 @@ Required metrics:
 - retry count, tool failures, and provider/model availability failures;
 - cost, if the provider exposes a price sheet for the exact account/model.
 
+The bundled `scripts/benchmark_ab.py` runs paired JSON-only tasks, scores exact expected answers, alternates arm order, supports `--resume`, and writes raw runs plus summaries. It reports both raw total tokens and uncached tokens. The latter is often the more useful proxy when cached input is priced or processed differently, but it is still not a provider invoice.
+
 Report medians and bootstrap confidence intervals by task class. A useful primary comparison is:
 
 ```text
