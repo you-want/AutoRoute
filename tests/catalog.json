@@ -1,0 +1,7 @@
+{
+  "models": [
+    {"slug": "gpt-5.6-luna", "routing_tier": "low", "priority": 30, "supported_reasoning_levels": [{"effort": "none"}, {"effort": "low"}, {"effort": "medium"}]},
+    {"slug": "gpt-5.6-terra", "routing_tier": "medium", "priority": 20, "supported_reasoning_levels": [{"effort": "none"}, {"effort": "low"}, {"effort": "medium"}, {"effort": "high"}]},
+    {"slug": "gpt-5.6-sol", "routing_tier": "high", "priority": 10, "supported_reasoning_levels": [{"effort": "none"}, {"effort": "low"}, {"effort": "medium"}, {"effort": "high"}, {"effort": "xhigh"}, {"effort": "max"}]}
+  ]
+}

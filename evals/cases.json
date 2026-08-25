@@ -1,0 +1,6 @@
+[
+  {"id": "simple-button", "prompt": "Add a loading state to the Button component", "expected_level": "low"},
+  {"id": "debug-state", "prompt": "Debug an intermittent React state synchronization bug across the page", "expected_level": "high"},
+  {"id": "architecture-sync", "prompt": "Design a repository-wide collaborative editing architecture with conflict resolution, persistence, and a migration plan", "expected_level": "xhigh"},
+  {"id": "security-migration", "prompt": "Perform a production database authentication migration with rollback and compatibility checks", "expected_level": "high"}
+]
