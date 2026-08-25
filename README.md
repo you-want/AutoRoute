@@ -23,6 +23,8 @@ Workload can be inferred from the prompt or made explicit with `--workload simpl
 
 If Codex's local model cache is incomplete, copy `rules/codex-models.example.json` to `~/.codex/autoroute.json` and keep only models and reasoning levels that are genuinely available in your environment.
 
+AutoRoute does not live-probe every model on each request. For custom providers, verify a model with a minimal read-only `codex exec` probe before adding it to `~/.codex/autoroute.json`; an advertised model can still return a provider-side 503.
+
 This repository root is the Skill directory. Clone it directly into the personal skills directory—there is no extra nested package layer:
 
 ```bash

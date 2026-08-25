@@ -313,6 +313,10 @@ def choose_model(models: list[dict[str, Any]], level: str, current: str | None, 
         return {"slug": explicit, "display_name": explicit, "reasoning": [], "priority": 0, "routing_tier": None}, "explicit model (not discovered)"
     target_tier = LEVELS.index(level) if level in LEVELS else 2
     scores = scores or {}
+    if current and not any(model.get("routing_source") == "catalog" for model in models):
+        for model in models:
+            if model["slug"] == current:
+                return model, "current configured model (catalog tier metadata unavailable)"
     preferred_families = workload_model_families(workload)
     for family in preferred_families:
         matches = [model for model in models if family == "sol" and "sol" in model["slug"].lower() or family in model["slug"].lower()]

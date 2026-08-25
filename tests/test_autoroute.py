@@ -2,6 +2,7 @@
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -51,10 +52,11 @@ def main():
     assert long_horizon["model"] == "gpt-5.2", long_horizon
     assert long_horizon["effort"] == "xhigh", long_horizon
 
-    long_horizon_without_52 = ROOT / "tests" / "without_52_catalog.json"
     catalog_without_52 = json.loads(CATALOG.read_text(encoding="utf-8"))
     catalog_without_52["models"] = [model for model in catalog_without_52["models"] if model["slug"] != "gpt-5.2"]
-    long_horizon_without_52.write_text(json.dumps(catalog_without_52), encoding="utf-8")
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as file_handle:
+        long_horizon_without_52 = Path(file_handle.name)
+        json.dump(catalog_without_52, file_handle)
     try:
         fallback = subprocess.run(
             [sys.executable, str(SCRIPT), "--models-file", str(long_horizon_without_52), "--json", "--scores",
