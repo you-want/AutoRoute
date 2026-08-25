@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import os
 from pathlib import Path
 
 
@@ -12,11 +13,14 @@ CATALOG = ROOT / "tests" / "catalog.json"
 
 
 def run(prompt, *extra):
+    environment = dict(os.environ)
+    environment["AUTOROUTE_SKIP_PROBE"] = "1"
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--models-file", str(CATALOG), "--json", *extra, prompt],
         check=True,
         capture_output=True,
         text=True,
+        env=environment,
     )
     return json.loads(result.stdout)
 
@@ -62,6 +66,7 @@ def main():
             [sys.executable, str(SCRIPT), "--models-file", str(long_horizon_without_52), "--json", "--scores",
              '{"complexity":4,"scope":4,"reasoning":4,"risk":2,"context":5,"iteration":5}',
              "Design a multi-quarter repository modernization roadmap"], check=True, capture_output=True, text=True,
+            env={**os.environ, "AUTOROUTE_SKIP_PROBE": "1"},
         )
         assert json.loads(fallback.stdout)["model"] == "gpt-5.6-sol", fallback.stdout
     finally:
@@ -75,7 +80,7 @@ def main():
     try:
         conservative = subprocess.run(
             [sys.executable, str(SCRIPT), "--models-file", str(no_tier), "--json", "Add a loading state"],
-            check=True, capture_output=True, text=True,
+            check=True, capture_output=True, text=True, env={**os.environ, "AUTOROUTE_SKIP_PROBE": "1"},
         )
         assert json.loads(conservative.stdout)["model"] == "gpt-5.6-sol", conservative.stdout
     finally:
@@ -114,6 +119,26 @@ def main():
     manual = run("Rewrite the parser", "--mode", "manual")
     assert manual["changed_current_session"] is False, manual
     assert "untouched" in manual["note"], manual
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir = Path(temp_dir)
+        probe_catalog = temp_dir / "catalog.json"
+        probe_catalog.write_text(json.dumps({"models": [
+            {"slug": "gpt-good", "routing_tier": "low", "priority": 1, "supported_reasoning_levels": ["none", "low"]},
+            {"slug": "gpt-bad", "routing_tier": "medium", "priority": 2, "supported_reasoning_levels": ["none", "medium"]},
+        ]}), encoding="utf-8")
+        state_file = temp_dir / "state.json"
+        probe = subprocess.run(
+            [sys.executable, str(SCRIPT), "--models-file", str(probe_catalog), "--state-file", str(state_file),
+             "--refresh-models", "--list-models", "--json", "probe"],
+            check=True, capture_output=True, text=True,
+            env={**os.environ, "AUTOROUTE_CODEX_BIN": str(ROOT / "tests" / "fake_codex.py")},
+        )
+        listing = json.loads(probe.stdout)
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        assert state["models"]["gpt-good"]["available"] is True, state
+        assert state["models"]["gpt-bad"]["available"] is False, state
+        assert listing["selected"]["model"] == "gpt-good", listing
     print("autoroute tests passed")
 
 

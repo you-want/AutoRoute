@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+SKILL_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+python3 "$SKILL_DIR/scripts/autoroute.py" --list-models >/dev/null
+exec codex "$@"

@@ -11,6 +11,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -152,6 +156,15 @@ def current_codex_config() -> dict[str, str]:
     return values
 
 
+def state_path(config: dict[str, Any], explicit: str | None = None) -> Path:
+    if explicit:
+        return Path(explicit).expanduser()
+    if config.get("state_file"):
+        return Path(str(config["state_file"])).expanduser()
+    codex_home = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
+    return codex_home / "autoroute-state.json"
+
+
 def catalog_paths(config: dict[str, Any], explicit: str | None) -> list[Path]:
     paths: list[Path] = []
     for value in (explicit, config.get("models_file"), os.environ.get("AUTOROUTE_MODELS_FILE")):
@@ -203,15 +216,146 @@ def normalize_models(raw: Any) -> list[dict[str, Any]]:
 
 
 def discover_models(config: dict[str, Any], explicit: str | None) -> tuple[list[dict[str, Any]], str | None, bool]:
+    merged: dict[str, dict[str, Any]] = {}
+    sources = []
     configured = normalize_models(config.get("models", []))
+    for model in configured:
+        merged[model["slug"]] = model
     if configured:
-        return configured, "autoroute config models", False
+        sources.append("autoroute config models")
     for path in catalog_paths(config, explicit):
         raw = read_json(path)
         models = normalize_models(raw)
         if models:
-            return models, str(path), False
-    return [], None, True
+            sources.append(str(path))
+            for model in models:
+                if model["slug"] not in merged:
+                    merged[model["slug"]] = model
+    return list(merged.values()), ", ".join(sources) or None, not bool(merged)
+
+
+def probe_effort(model: dict[str, Any], current: dict[str, str]) -> str:
+    supported = [effort for effort in EFFORTS if effort in model.get("reasoning", [])]
+    if model["slug"] == current.get("model") and current.get("model_reasoning_effort") in supported:
+        return current["model_reasoning_effort"]
+    for effort in ("low", "none", "medium", "high", "xhigh", "max", "ultra"):
+        if effort in supported:
+            return effort
+    return current.get("model_reasoning_effort", "medium")
+
+
+def probe_model(model: dict[str, Any], effort: str, timeout: int) -> dict[str, Any]:
+    codex_bin = os.environ.get("AUTOROUTE_CODEX_BIN", "codex")
+    command = [
+        codex_bin, "exec", "--ephemeral", "--json", "--skip-git-repo-check",
+        "-C", tempfile.gettempdir(), "-s", "read-only", "-m", model["slug"],
+        "-c", f'model_reasoning_effort="{effort}"', "Reply with exactly: OK",
+    ]
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=timeout,
+        )
+        timed_out = False
+    except subprocess.TimeoutExpired as exc:
+        completed = subprocess.CompletedProcess(command, 124, exc.stdout or "", exc.stderr or "")
+        timed_out = True
+    completed_turn = False
+    answer_ok = False
+    errors = []
+    stdout = completed.stdout.decode() if isinstance(completed.stdout, bytes) else completed.stdout
+    stderr = completed.stderr.decode() if isinstance(completed.stderr, bytes) else completed.stderr
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "turn.completed":
+            completed_turn = True
+        if event.get("type") == "error":
+            errors.append(event.get("message", ""))
+        if event.get("type") == "item.completed":
+            item = event.get("item", {})
+            if item.get("type") == "agent_message" and item.get("text", "").strip() == "OK":
+                answer_ok = True
+            elif item.get("type") == "error":
+                errors.append(item.get("message", ""))
+    stderr_tail = [line[-500:] for line in stderr.splitlines()[-3:]]
+    return {
+        "available": completed.returncode == 0 and completed_turn and answer_ok and not timed_out,
+        "tested_effort": effort,
+        "latency_seconds": round(time.monotonic() - started, 3),
+        "exit_code": completed.returncode,
+        "timed_out": timed_out,
+        "errors": errors[-3:],
+        "stderr_tail": stderr_tail,
+    }
+
+
+def refresh_model_state(models: list[dict[str, Any]], source: str | None, current: dict[str, str], path: Path, timeout: int) -> dict[str, Any]:
+    results = {}
+    workers = min(4, max(1, len(models)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {}
+        for model in models:
+            effort = probe_effort(model, current)
+            futures[executor.submit(probe_model, model, effort, timeout)] = model
+        for future in as_completed(futures):
+            model = futures[future]
+            result = future.result()
+            result["supported_efforts"] = model.get("reasoning", [])
+            result["routing_tier"] = model.get("routing_tier")
+            result["routing_source"] = model.get("routing_source")
+            results[model["slug"]] = result
+    state = {
+        "version": 1,
+        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+        "refreshed_epoch": time.time(),
+        "source": source,
+        "default_model": current.get("model"),
+        "default_effort": current.get("model_reasoning_effort"),
+        "models": results,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    return state
+
+
+def load_model_state(path: Path, ttl_seconds: int) -> tuple[dict[str, Any] | None, bool]:
+    raw = read_json(path)
+    if not isinstance(raw, dict) or not isinstance(raw.get("models"), dict):
+        return None, True
+    refreshed = raw.get("refreshed_epoch", 0)
+    try:
+        stale = time.time() - float(refreshed) >= ttl_seconds
+    except (TypeError, ValueError):
+        stale = True
+    return raw, stale
+
+
+def filter_verified_models(models: list[dict[str, Any]], state: dict[str, Any] | None, default_model: str | None) -> list[dict[str, Any]]:
+    if not state:
+        return models
+    verified = []
+    state_models = state.get("models", {})
+    for model in models:
+        probe = state_models.get(model["slug"], {})
+        if probe.get("available") or model["slug"] == default_model:
+            copy = dict(model)
+            copy["verified_available"] = bool(probe.get("available"))
+            verified.append(copy)
+    return verified
+
+
+def mark_model_unavailable(path: Path, model: str, message: str) -> None:
+    state = read_json(path)
+    if not isinstance(state, dict) or not isinstance(state.get("models"), dict):
+        return
+    entry = state["models"].setdefault(model, {})
+    entry["available"] = False
+    entry["runtime_failure"] = message
+    entry["failed_at"] = datetime.now(timezone.utc).isoformat()
+    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
 def number_signal(signals: dict[str, Any], key: str) -> int:
@@ -368,7 +512,7 @@ def effort_floor(target: str, workload: str) -> str:
 
 
 def build_command(model: str, effort: str, prompt: str) -> list[str]:
-    return ["codex", "-m", model, "-c", f'model_reasoning_effort="{effort}"', prompt]
+    return [os.environ.get("AUTOROUTE_CODEX_BIN", "codex"), "-m", model, "-c", f'model_reasoning_effort="{effort}"', prompt]
 
 
 def route(args: argparse.Namespace) -> dict[str, Any]:
@@ -382,8 +526,23 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
     score_overrides = json.loads(args.scores) if args.scores else {}
     if not isinstance(score_overrides, dict):
         raise ValueError("--scores must be a JSON object")
-    models, source, degraded = discover_models(config, args.models_file)
     current = current_codex_config()
+    models, source, degraded = discover_models(config, args.models_file)
+    cache_path = state_path(config, args.state_file)
+    state, stale = load_model_state(cache_path, args.ttl)
+    if os.environ.get("AUTOROUTE_SKIP_PROBE", "").lower() in {"1", "true", "yes"}:
+        state, stale = None, True
+    discovered_slugs = {model["slug"] for model in models}
+    cached_slugs = set(state.get("models", {})) if state else set()
+    inventory_changed = discovered_slugs != cached_slugs
+    should_probe = os.environ.get("AUTOROUTE_SKIP_PROBE", "").lower() not in {"1", "true", "yes"}
+    if should_probe and (args.refresh_models or state is None or stale or inventory_changed):
+        if models:
+            state = refresh_model_state(models, source, current, cache_path, args.probe_timeout)
+            stale = False
+            inventory_changed = False
+    all_discovered_models = len(models)
+    models = filter_verified_models(models, state, current.get("model"))
     if not models:
         fallback_model = args.model or current.get("model") or "current-configured-model"
         models = [{"slug": fallback_model, "display_name": fallback_model, "reasoning": [current.get("model_reasoning_effort", "high"), "none"], "priority": 0, "routing_tier": None}]
@@ -427,6 +586,16 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
         "workload": workload,
         "dimensions": {key: {"score": scores[key], "evidence": evidence[key]} for key in DIMENSIONS},
         "discovery": {"source": source, "degraded": degraded, "model_count": len(models)},
+        "availability": {
+            "state_file": str(cache_path),
+            "refreshed_at": state.get("refreshed_at") if state else None,
+            "stale": stale,
+            "inventory_changed": inventory_changed,
+            "discovered_count": all_discovered_models,
+            "verified_count": sum(1 for model in models if model.get("verified_available")),
+            "default_model_fallback": current.get("model"),
+            "models": state.get("models", {}) if state else {},
+        },
         "selection": {"model_reason": model_reason, "effort_reason": effort_reason},
         "model_tier": model.get("routing_tier"),
         "model_tier_source": model.get("routing_source"),
@@ -445,7 +614,7 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Route a coding task to a discovered Codex model and reasoning effort.")
-    parser.add_argument("prompt", help="Task to analyze")
+    parser.add_argument("prompt", nargs="?", default="refresh model inventory", help="Task to analyze")
     parser.add_argument("--mode", choices=["auto", "suggest", "manual"])
     parser.add_argument("--config")
     parser.add_argument("--models-file")
@@ -457,11 +626,19 @@ def main() -> int:
     parser.add_argument("--effort", choices=EFFORTS, help="Explicit reasoning effort constraint")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--run", action="store_true", help="Start a separate Codex process with the recommendation")
+    parser.add_argument("--refresh-models", action="store_true", help="Probe every discovered model now")
+    parser.add_argument("--list-models", action="store_true", help="List discovered and verified models, then exit")
+    parser.add_argument("--state-file", help="Availability state JSON path")
+    parser.add_argument("--ttl", type=int, default=900, help="Availability cache TTL in seconds")
+    parser.add_argument("--probe-timeout", type=int, default=45, help="Per-model availability probe timeout")
     args = parser.parse_args()
     try:
         result = route(args)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
+    if args.list_models:
+        print(json.dumps({"discovery": result["discovery"], "availability": result["availability"], "selected": {"model": result["model"], "effort": result["effort"]}}, indent=2))
+        return 0
     if args.as_json:
         print(json.dumps(result, indent=2, ensure_ascii=True))
     else:
@@ -479,7 +656,16 @@ def main() -> int:
         if not shutil.which("codex"):
             print("codex executable not found; command was printed but not run.", file=sys.stderr)
             return 2
-        return subprocess.run(result["command"]).returncode
+        completed = subprocess.run(result["command"])
+        if completed.returncode != 0:
+            mark_model_unavailable(Path(result["availability"]["state_file"]), result["model"], f"runtime exit code {completed.returncode}")
+            default_model = current_codex_config().get("model")
+            default_effort = current_codex_config().get("model_reasoning_effort", "high")
+            if default_model and default_model != result["model"]:
+                fallback_command = build_command(default_model, default_effort, args.prompt)
+                print(f"Selected model failed; retrying with default model {default_model}.", file=sys.stderr)
+                return subprocess.run(fallback_command).returncode
+        return completed.returncode
     return 0
 
 

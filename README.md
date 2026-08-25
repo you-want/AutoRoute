@@ -25,6 +25,24 @@ If Codex's local model cache is incomplete, copy `rules/codex-models.example.jso
 
 AutoRoute does not live-probe every model on each request. For custom providers, verify a model with a minimal read-only `codex exec` probe before adding it to `~/.codex/autoroute.json`; an advertised model can still return a provider-side 503.
 
+Availability commands:
+
+```bash
+python3 scripts/autoroute.py --list-models "refresh model inventory"
+python3 scripts/autoroute.py --refresh-models --list-models "refresh model inventory"
+python3 scripts/autoroute.py --ttl 0 "route this task"
+```
+
+The cache is refreshed on first use and then every 15 minutes by default. A Skill cannot receive a literal Codex process-start event, so this first-use/TTL refresh is the portable equivalent.
+
+If you want an inventory check before every terminal Codex launch, use the bundled wrapper instead of `codex`. It re-discovers candidates every launch and live-probes only when the inventory changed or the TTL expired:
+
+```bash
+~/.codex/skills/autoroute/scripts/codex-with-autoroute
+```
+
+You may add your own shell alias to that wrapper. AutoRoute does not edit shell startup files automatically.
+
 This repository root is the Skill directory. Clone it directly into the personal skills directory—there is no extra nested package layer:
 
 ```bash

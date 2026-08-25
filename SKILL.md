@@ -12,6 +12,7 @@ AutoRoute is a routing layer for Codex coding work. Its goal is to minimize tota
 ## Operating contract
 
 - Discover available models and supported reasoning levels at runtime. Do not assume that a model named in documentation or an old catalog is available to this user.
+- On first use or after the availability TTL, run the lightweight model probes and cache their results. Route only to verified models; if a selected model execution fails, retry once with the user's configured default model and effort.
 - Respect `autoroute.enabled` and `autoroute.mode` when a project or user config provides them. `manual` leaves the current Codex settings alone; `suggest` reports a recommendation; `auto` may prepare a new-session invocation.
 - Preserve an explicitly requested model or effort. Treat it as a user constraint and explain any incompatibility instead of silently overriding it.
 - Analyze six dimensions: complexity, scope, reasoning demand, risk, context size, and iteration horizon. Record concise evidence for each score.

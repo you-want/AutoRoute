@@ -24,6 +24,10 @@ The JSON shape is deliberately small:
 
 `mode` is one of `auto`, `suggest`, or `manual`. AutoRoute does not rewrite the user's Codex config as a side effect. `--run` is the explicit opt-in that starts a separate `codex` process with the selected model and effort.
 
+On first use, or when the availability cache is older than `ttl` (default 900 seconds), AutoRoute runs a minimal read-only `codex exec` probe for each discovered model and stores results in `~/.codex/autoroute-state.json`. Use `--refresh-models` to force a refresh, `--list-models` to inspect the state, and `--ttl 0` to probe every invocation. Set `AUTOROUTE_SKIP_PROBE=1` only for offline tests.
+
+`scripts/codex-with-autoroute` checks the inventory before launching the normal terminal Codex CLI. Candidate discovery runs every launch; live probes run only after an inventory change or TTL expiry. It is opt-in because a Skill cannot safely rewrite a user's shell aliases or intercept every Codex surface (desktop, IDE, cloud, and CLI) by itself.
+
 Model discovery checks `models_file`, `AUTOROUTE_MODELS_FILE`, the standard `~/.codex/models_cache.json`, and then the optional `~/.codex/cc-switch-model-catalog.json`. It understands both a catalog with a `models` array and a direct array of model records. An empty or malformed catalog is reported as degraded discovery, not treated as proof that no models exist.
 
 An explicit `autoroute.models` inventory takes precedence over cache discovery. Copy `rules/codex-models.example.json` to `~/.codex/autoroute.json` and remove models or efforts that your Codex account/provider cannot actually launch. This makes routing deterministic when the local model cache is incomplete or stale.
