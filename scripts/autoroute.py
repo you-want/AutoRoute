@@ -161,8 +161,18 @@ def state_path(config: dict[str, Any], explicit: str | None = None) -> Path:
         return Path(explicit).expanduser()
     if config.get("state_file"):
         return Path(str(config["state_file"])).expanduser()
-    codex_home = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
-    return codex_home / "autoroute-state.json"
+    cache_dir = config.get("cache_dir") or os.environ.get("AUTOROUTE_CACHE_DIR")
+    if cache_dir:
+        return Path(str(cache_dir)).expanduser() / "autoroute-state.json"
+    if sys.platform == "darwin":
+        default_dir = Path.home() / "Library" / "Caches" / "codex"
+    else:
+        default_dir = Path(os.environ.get("XDG_CACHE_HOME", "~/.cache")).expanduser() / "codex"
+    return default_dir / "autoroute-state.json"
+
+
+def fallback_state_path() -> Path:
+    return Path(tempfile.gettempdir()) / "codex" / "autoroute-state.json"
 
 
 def catalog_paths(config: dict[str, Any], explicit: str | None) -> list[Path]:
@@ -260,6 +270,17 @@ def probe_model(model: dict[str, Any], effort: str, timeout: int) -> dict[str, A
     except subprocess.TimeoutExpired as exc:
         completed = subprocess.CompletedProcess(command, 124, exc.stdout or "", exc.stderr or "")
         timed_out = True
+    except OSError as exc:
+        return {
+            "available": False,
+            "probe_blocked": True,
+            "tested_effort": effort,
+            "latency_seconds": round(time.monotonic() - started, 3),
+            "exit_code": getattr(exc, "errno", 1) or 1,
+            "timed_out": False,
+            "errors": [str(exc)],
+            "stderr_tail": [],
+        }
     completed_turn = False
     answer_ok = False
     errors = []
@@ -281,8 +302,16 @@ def probe_model(model: dict[str, Any], effort: str, timeout: int) -> dict[str, A
             elif item.get("type") == "error":
                 errors.append(item.get("message", ""))
     stderr_tail = [line[-500:] for line in stderr.splitlines()[-3:]]
+    blocked_text = "\n".join([stderr, *errors]).lower()
+    probe_blocked = any(marker in blocked_text for marker in (
+        "operation not permitted",
+        "permission denied",
+        "failed to initialize in-process app-server",
+        "sandbox",
+    ))
     return {
         "available": completed.returncode == 0 and completed_turn and answer_ok and not timed_out,
+        "probe_blocked": probe_blocked,
         "tested_effort": effort,
         "latency_seconds": round(time.monotonic() - started, 3),
         "exit_code": completed.returncode,
@@ -307,6 +336,7 @@ def refresh_model_state(models: list[dict[str, Any]], source: str | None, curren
             result["routing_tier"] = model.get("routing_tier")
             result["routing_source"] = model.get("routing_source")
             results[model["slug"]] = result
+    blocked = [result.get("probe_blocked", False) for result in results.values()]
     state = {
         "version": 1,
         "refreshed_at": datetime.now(timezone.utc).isoformat(),
@@ -315,9 +345,25 @@ def refresh_model_state(models: list[dict[str, Any]], source: str | None, curren
         "default_model": current.get("model"),
         "default_effort": current.get("model_reasoning_effort"),
         "models": results,
+        "probe_status": "blocked" if blocked and all(blocked) else ("partial" if any(blocked) else "complete"),
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    candidates = [path]
+    fallback = fallback_state_path()
+    if fallback != path:
+        candidates.append(fallback)
+    write_error = None
+    for target in candidates:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(state, indent=2), encoding="utf-8")
+            state["cache_path"] = str(target)
+            state["cache_write"] = {"path": str(target), "ok": True, "fallback": target != path}
+            break
+        except OSError as exc:
+            write_error = str(exc)
+    else:
+        state["cache_path"] = str(path)
+        state["cache_write"] = {"path": str(path), "ok": False, "error": write_error}
     return state
 
 
@@ -333,8 +379,19 @@ def load_model_state(path: Path, ttl_seconds: int) -> tuple[dict[str, Any] | Non
     return raw, stale
 
 
+def cache_status(state: dict[str, Any] | None) -> dict[str, Any]:
+    if not state:
+        return {"ok": False, "status": "unavailable"}
+    status = state.get("cache_write")
+    if isinstance(status, dict):
+        return status
+    return {"ok": True, "path": "existing cache"}
+
+
 def filter_verified_models(models: list[dict[str, Any]], state: dict[str, Any] | None, default_model: str | None) -> list[dict[str, Any]]:
     if not state:
+        return models
+    if state.get("probe_status") == "blocked":
         return models
     verified = []
     state_models = state.get("models", {})
@@ -539,6 +596,7 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
     if should_probe and (args.refresh_models or state is None or stale or inventory_changed):
         if models:
             state = refresh_model_state(models, source, current, cache_path, args.probe_timeout)
+            cache_path = Path(state.get("cache_path", cache_path))
             stale = False
             inventory_changed = False
     all_discovered_models = len(models)
@@ -594,6 +652,8 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
             "discovered_count": all_discovered_models,
             "verified_count": sum(1 for model in models if model.get("verified_available")),
             "default_model_fallback": current.get("model"),
+            "cache": cache_status(state),
+            "probe_status": state.get("probe_status") if state else "not_run",
             "models": state.get("models", {}) if state else {},
         },
         "selection": {"model_reason": model_reason, "effort_reason": effort_reason},

@@ -139,6 +139,31 @@ def main():
         assert state["models"]["gpt-good"]["available"] is True, state
         assert state["models"]["gpt-bad"]["available"] is False, state
         assert listing["selected"]["model"] == "gpt-good", listing
+
+        blocked_parent = temp_dir / "blocked"
+        blocked_parent.write_text("not a directory", encoding="utf-8")
+        fallback_state = blocked_parent / "state.json"
+        fallback_probe = subprocess.run(
+            [sys.executable, str(SCRIPT), "--models-file", str(probe_catalog),
+             "--state-file", str(fallback_state), "--refresh-models", "--json", "probe"],
+            check=True, capture_output=True, text=True,
+            env={**os.environ, "AUTOROUTE_CODEX_BIN": str(ROOT / "tests" / "fake_codex.py")},
+        )
+        fallback_result = json.loads(fallback_probe.stdout)
+        assert fallback_result["model"] == "gpt-good", fallback_result
+        assert fallback_result["availability"]["state_file"] != str(fallback_state), fallback_result
+
+        blocked_state = temp_dir / "blocked-state.json"
+        blocked_probe = subprocess.run(
+            [sys.executable, str(SCRIPT), "--models-file", str(probe_catalog),
+             "--state-file", str(blocked_state), "--refresh-models", "--json",
+             "--model", "gpt-good", "probe"],
+            check=True, capture_output=True, text=True,
+            env={**os.environ, "AUTOROUTE_CODEX_BIN": str(ROOT / "tests" / "blocked_codex.py")},
+        )
+        blocked_result = json.loads(blocked_probe.stdout)
+        assert blocked_result["model"] == "gpt-good", blocked_result
+        assert blocked_result["availability"]["probe_status"] == "blocked", blocked_result
     print("autoroute tests passed")
 
 

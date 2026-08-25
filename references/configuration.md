@@ -24,7 +24,9 @@ The JSON shape is deliberately small:
 
 `mode` is one of `auto`, `suggest`, or `manual`. AutoRoute does not rewrite the user's Codex config as a side effect. `--run` is the explicit opt-in that starts a separate `codex` process with the selected model and effort.
 
-On first use, or when the availability cache is older than `ttl` (default 900 seconds), AutoRoute runs a minimal read-only `codex exec` probe for each discovered model and stores results in `~/.codex/autoroute-state.json`. Use `--refresh-models` to force a refresh, `--list-models` to inspect the state, and `--ttl 0` to probe every invocation. Set `AUTOROUTE_SKIP_PROBE=1` only for offline tests.
+On first use, or when the availability cache is older than `ttl` (default 900 seconds), AutoRoute runs a minimal read-only `codex exec` probe for each discovered model and stores results in the platform user cache (`~/Library/Caches/codex` on macOS, `$XDG_CACHE_HOME/codex` or `~/.cache/codex` on Linux). It never uses `CODEX_HOME` for AutoRoute state by default. Set `AUTOROUTE_CACHE_DIR` or `autoroute.cache_dir` to override the cache directory. If the selected directory is unavailable, it falls back to the system temporary directory and continues routing. Use `--state-file` only when an exact state file path is required. Use `--refresh-models` to force a refresh, `--list-models` to inspect the state, and `--ttl 0` to probe every invocation. Set `AUTOROUTE_SKIP_PROBE=1` only for offline tests.
+
+Live probes are optional. When Codex app-server startup is blocked by a sandbox or permissions policy, the result reports `availability.probe_status: "blocked"` and keeps the discovered model inventory for routing. This avoids treating an execution-policy limitation as evidence that models are unavailable.
 
 `scripts/codex-with-autoroute` checks the inventory before launching the normal terminal Codex CLI. Candidate discovery runs every launch; live probes run only after an inventory change or TTL expiry. It is opt-in because a Skill cannot safely rewrite a user's shell aliases or intercept every Codex surface (desktop, IDE, cloud, and CLI) by itself.
 

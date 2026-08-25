@@ -22,6 +22,8 @@ AutoRoute is a routing layer for Codex coding work. Its goal is to minimize tota
 - If signals show failed tests, repeated retries, cross-language changes, or a larger-than-expected diff, apply adaptive escalation and explain the trigger.
 - A Codex Skill cannot change the model of an already-running conversation. When execution is requested, use the CLI helper to start a new Codex session and make that boundary explicit.
 - If discovery fails, fall back to the current configured model and a supported/default effort, and mark the recommendation as degraded.
+- Keep AutoRoute state separate from `CODEX_HOME`: use the platform user cache by default, honor `AUTOROUTE_CACHE_DIR`/`cache_dir`, and fall back to a temporary cache if needed. Cache persistence must never abort routing.
+- Treat live `codex exec` probes as optional capability checks. If app-server startup is blocked by a sandbox or permissions policy, retain the discovered inventory, report `probe_status=blocked`, and route using catalog/current-model metadata instead of declaring every model unavailable.
 
 ## Use the helper
 
