@@ -32,7 +32,7 @@ python3 scripts/autoroute.py --signals '{"test_failures":2,"changed_files":14}' 
 python3 scripts/autoroute.py --mode auto --run "Implement the approved repository-wide migration"
 ```
 
-Use `references/configuration.md` for config precedence and `references/routing.md` for the scoring and fallback model. The bundled `rules/default.json` and `evals/cases.json` are baseline, editable project resources rather than claims about any particular provider's current catalog. Do not treat a keyword match as certainty: report the evidence and use the catalog's supported capabilities as the final constraint.
+Use `references/configuration.md` for config precedence, `references/routing.md` for the scoring and fallback model, and `references/evaluation.md` when measuring impact. The bundled `rules/default.json` and `evals/cases.json` are baseline, editable project resources rather than claims about any particular provider's current catalog. Do not treat a keyword match as certainty: report the evidence and use the catalog's supported capabilities as the final constraint.
 
 ## Response shape in conversation
 

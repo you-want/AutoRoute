@@ -33,3 +33,5 @@ python3 scripts/run_evals.py --models-file tests/catalog.json
 ```
 
 The router reads a local Codex model catalog when one is available. It also accepts any compatible catalog through `--models-file`, so the scoring and tests can be reused without publishing a user's private model list.
+
+For a real control/treatment comparison, see [references/evaluation.md](references/evaluation.md). Codex JSON events expose per-turn usage fields; AutoRoute itself cannot guarantee a token saving because retries, latency, provider availability, and task success are part of the total cost.

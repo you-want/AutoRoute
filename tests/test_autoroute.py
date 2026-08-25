@@ -30,6 +30,20 @@ def main():
     assert high["level"] == "high", high
     assert high["model"] == "gpt-5.6-sol", high
 
+    no_tier = ROOT / "tests" / "no_tier_catalog.json"
+    no_tier.write_text(json.dumps({"models": [
+        {"slug": "gpt-5.6", "priority": 1, "supported_reasoning_levels": ["none", "high"]},
+        {"slug": "gpt-5.6-sol", "priority": 2, "supported_reasoning_levels": ["none", "high"]},
+    ]}), encoding="utf-8")
+    try:
+        conservative = subprocess.run(
+            [sys.executable, str(SCRIPT), "--models-file", str(no_tier), "--json", "Add a loading state"],
+            check=True, capture_output=True, text=True,
+        )
+        assert json.loads(conservative.stdout)["model"] == "gpt-5.6-sol", conservative.stdout
+    finally:
+        no_tier.unlink(missing_ok=True)
+
     escalated = run(
         "Refactor the sync layer",
         "--signals",

@@ -240,6 +240,10 @@ def choose_model(models: list[dict[str, Any]], level: str, current: str | None, 
             tiered.append((abs(tier - target_tier), model["priority"], model))
     if tiered:
         return sorted(tiered, key=lambda item: (item[0], item[1]))[0][2], "catalog routing tier"
+    if current:
+        for model in models:
+            if model["slug"] == current:
+                return model, "current configured model (no catalog tier metadata)"
     token = "luna" if level == "low" else "terra" if level == "medium" else "sol"
     matching = [model for model in models if token in model["slug"].lower()]
     if matching:
@@ -249,10 +253,6 @@ def choose_model(models: list[dict[str, Any]], level: str, current: str | None, 
         balanced = [model for model in models if not any(word in model["slug"].lower() for word in tier_words)]
         if balanced:
             return sorted(balanced, key=lambda model: model["priority"])[0], "generic balanced-model fallback"
-    if current:
-        for model in models:
-            if model["slug"] == current:
-                return model, "current configured model fallback"
     return sorted(models, key=lambda model: model["priority"])[0], "catalog priority fallback"
 
 
