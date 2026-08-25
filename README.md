@@ -13,8 +13,15 @@ python3 scripts/autoroute.py "Add a loading state to the Button component"
 python3 scripts/autoroute.py --mode suggest --json "Debug intermittent React state desync"
 python3 scripts/autoroute.py --signals '{"test_failures":2,"changed_files":14}' "Refactor the sync layer"
 python3 scripts/autoroute.py --scores '{"complexity":4,"scope":5,"reasoning":4,"risk":2,"context":3,"iteration":4}' "Plan the migration"
+python3 scripts/autoroute.py --workload research "Compare these implementation options"
 python3 scripts/autoroute.py --mode auto --run "Implement the approved repository-wide migration"
 ```
+
+With a catalog containing `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, and `gpt-5.2`, typical routing is: simple work -> Luna + none/low; everyday implementation -> Terra + medium; complex debugging/architecture -> Sol + high/xhigh; long-horizon professional work -> GPT-5.2 when it is available. The chosen effort is always clamped to the selected model's supported levels.
+
+Workload can be inferred from the prompt or made explicit with `--workload simple|everyday|debugging|architecture|research|long_horizon|high_risk`. Explicit user model/effort constraints still take precedence.
+
+If Codex's local model cache is incomplete, copy `rules/codex-models.example.json` to `~/.codex/autoroute.json` and keep only models and reasoning levels that are genuinely available in your environment.
 
 This repository root is the Skill directory. Clone it directly into the personal skills directory—there is no extra nested package layer:
 

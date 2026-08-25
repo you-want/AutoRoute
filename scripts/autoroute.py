@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 
-EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"]
+EFFORTS = ["none", "low", "medium", "high", "xhigh", "max", "ultra"]
 DEFAULT_WEIGHTS = {
     "complexity": 1.2,
     "scope": 1.0,
@@ -33,6 +33,77 @@ BANDS = [
 ]
 DIMENSIONS = tuple(DEFAULT_WEIGHTS)
 LEVELS = ["low", "medium", "high", "xhigh", "max"]
+MODEL_FAMILY_ORDER = {
+    "low": ["luna", "terra", "gpt-5.2", "gpt-5.5", "sol"],
+    "medium": ["terra", "gpt-5.2", "sol", "gpt-5.5", "luna"],
+    "high": ["sol", "gpt-5.5", "gpt-5.2", "terra", "luna"],
+    "xhigh": ["sol", "gpt-5.5", "gpt-5.2", "terra", "luna"],
+    "max": ["sol", "gpt-5.5", "gpt-5.2", "terra", "luna"],
+}
+WORKLOADS = ["simple", "everyday", "debugging", "architecture", "research", "long_horizon", "high_risk"]
+
+
+def normalize_tier(value: Any) -> str | None:
+    if isinstance(value, str) and value.lower() in LEVELS:
+        return value.lower()
+    if isinstance(value, int) and 0 <= value < len(LEVELS):
+        return LEVELS[value]
+    return None
+
+
+def infer_model_tier(slug: str) -> str | None:
+    name = slug.lower()
+    if "luna" in name:
+        return "low"
+    if "terra" in name or name in {"gpt-5.2", "gpt-5.2-codex"}:
+        return "medium"
+    if "sol" in name or name in {"gpt-5.5", "gpt-5.5-codex"}:
+        return "high"
+    return None
+
+
+def classify_workload(prompt: str, scores: dict[str, int]) -> str:
+    text = prompt.lower()
+    if scores.get("risk", 0) >= 4 or re.search(r"security|production|migration|rollback|安全|生产|迁移", text):
+        return "high_risk"
+    if scores.get("iteration", 0) >= 4 or scores.get("context", 0) >= 4 or re.search(r"long[- ]?term|long[- ]?horizon|roadmap|full implementation plan|长期|完整方案|路线图", text):
+        return "long_horizon"
+    if re.search(r"research|compare|comparison|evaluate|investigate|survey|benchmark|研究|调研|对比|评估", text):
+        return "research"
+    if re.search(r"debug|bug|race|flaky|root cause|调试|故障|根因|偶发", text):
+        return "debugging"
+    if scores.get("complexity", 0) >= 4 or re.search(r"architecture|distributed|concurr|system design|架构|分布式|并发|系统设计", text):
+        return "architecture"
+    if re.search(r"implement|build|create|add feature|新增功能|实现|开发|增加功能", text):
+        return "everyday"
+    if scores.get("complexity", 0) <= 1 and scores.get("scope", 0) <= 1 and scores.get("reasoning", 0) <= 1:
+        return "simple"
+    return "everyday"
+
+
+def workload_model_families(workload: str) -> list[str]:
+    return {
+        "simple": ["luna", "terra", "gpt-5.2"],
+        "everyday": ["terra", "gpt-5.2", "sol"],
+        "debugging": ["sol", "gpt-5.5", "gpt-5.2"],
+        "architecture": ["sol", "gpt-5.5", "gpt-5.2"],
+        "research": ["gpt-5.5", "gpt-5.2", "sol"],
+        "long_horizon": ["gpt-5.2", "sol", "gpt-5.5"],
+        "high_risk": ["sol", "gpt-5.5", "gpt-5.2"],
+    }[workload]
+
+
+def model_family_rank(slug: str, level: str, long_horizon: bool = False) -> int:
+    name = slug.lower()
+    order = MODEL_FAMILY_ORDER.get(level, MODEL_FAMILY_ORDER["high"])
+    if long_horizon and level in {"high", "xhigh", "max"}:
+        order = ["gpt-5.2", "sol", "gpt-5.5", "terra", "luna"]
+    for index, family in enumerate(order):
+        if family == "sol" and "sol" in name:
+            return index
+        if family in name:
+            return index
+    return len(order)
 
 
 def read_json(path: Path) -> Any:
@@ -45,9 +116,13 @@ def read_json(path: Path) -> Any:
 def load_config(path_arg: str | None) -> dict[str, Any]:
     config: dict[str, Any] = {"enabled": True, "mode": "auto"}
     candidates = []
+    codex_home = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
+    default_config = codex_home / "autoroute.json"
+    if default_config.exists():
+        candidates.append(default_config)
     if path_arg:
         candidates.append(Path(path_arg).expanduser())
-    elif os.environ.get("AUTOROUTE_CONFIG"):
+    if os.environ.get("AUTOROUTE_CONFIG"):
         candidates.append(Path(os.environ["AUTOROUTE_CONFIG"]).expanduser())
     for path in candidates:
         raw = read_json(path)
@@ -113,18 +188,24 @@ def normalize_models(raw: Any) -> list[dict[str, Any]]:
         else:
             levels = []
         levels = [level for level in levels if level in EFFORTS]
+        normalized_catalog_tier = normalize_tier(item.get("routing_tier") or item.get("capability_tier") or item.get("quality_tier"))
+        inferred_tier = normalized_catalog_tier or infer_model_tier(str(slug))
         models.append({
             "slug": str(slug),
             "display_name": str(item.get("display_name") or slug),
             "reasoning": levels,
             "priority": int(item.get("priority", 10000)) if str(item.get("priority", "")).lstrip("-").isdigit() else 10000,
             "context_window": item.get("context_window"),
-            "routing_tier": item.get("routing_tier") or item.get("capability_tier") or item.get("quality_tier"),
+            "routing_tier": inferred_tier,
+            "routing_source": "catalog" if normalized_catalog_tier else ("name" if inferred_tier else None),
         })
     return models
 
 
 def discover_models(config: dict[str, Any], explicit: str | None) -> tuple[list[dict[str, Any]], str | None, bool]:
+    configured = normalize_models(config.get("models", []))
+    if configured:
+        return configured, "autoroute config models", False
     for path in catalog_paths(config, explicit):
         raw = read_json(path)
         models = normalize_models(raw)
@@ -224,35 +305,33 @@ def band_for(score: int, bands: list[tuple[str, int, int, str]] | None = None) -
     return bands[-1][0], bands[-1][3]
 
 
-def choose_model(models: list[dict[str, Any]], level: str, current: str | None, explicit: str | None) -> tuple[dict[str, Any], str]:
+def choose_model(models: list[dict[str, Any]], level: str, current: str | None, explicit: str | None, scores: dict[str, int] | None = None, workload: str = "everyday") -> tuple[dict[str, Any], str]:
     if explicit:
         for model in models:
             if model["slug"] == explicit:
                 return model, "explicit model"
         return {"slug": explicit, "display_name": explicit, "reasoning": [], "priority": 0, "routing_tier": None}, "explicit model (not discovered)"
     target_tier = LEVELS.index(level) if level in LEVELS else 2
+    scores = scores or {}
+    preferred_families = workload_model_families(workload)
+    for family in preferred_families:
+        matches = [model for model in models if family == "sol" and "sol" in model["slug"].lower() or family in model["slug"].lower()]
+        if matches:
+            return sorted(matches, key=lambda model: (model_family_rank(model["slug"], level, workload == "long_horizon"), model["priority"]))[0], f"{workload} workload preference"
+    long_horizon = workload == "long_horizon"
     tiered = []
     for model in models:
-        tier = model.get("routing_tier")
-        if isinstance(tier, str) and tier.lower() in LEVELS:
-            tiered.append((abs(LEVELS.index(tier.lower()) - target_tier), model["priority"], model))
-        elif isinstance(tier, int) and 0 <= tier < len(LEVELS):
-            tiered.append((abs(tier - target_tier), model["priority"], model))
+        tier = normalize_tier(model.get("routing_tier"))
+        if tier:
+            tiered.append((abs(LEVELS.index(tier) - target_tier), model_family_rank(model["slug"], level, long_horizon), model["priority"], model))
     if tiered:
-        return sorted(tiered, key=lambda item: (item[0], item[1]))[0][2], "catalog routing tier"
+        selected = sorted(tiered, key=lambda item: (item[0], item[1], item[2]))[0][3]
+        source = selected.get("routing_source") or "inferred"
+        return selected, f"{source} model tier + family preference"
     if current:
         for model in models:
             if model["slug"] == current:
-                return model, "current configured model (no catalog tier metadata)"
-    token = "luna" if level == "low" else "terra" if level == "medium" else "sol"
-    matching = [model for model in models if token in model["slug"].lower()]
-    if matching:
-        return sorted(matching, key=lambda model: model["priority"])[0], f"{token} tier heuristic"
-    if level in {"low", "medium"}:
-        tier_words = ("luna", "terra", "sol", "mini", "nano", "pro", "max", "opus", "flash", "haiku")
-        balanced = [model for model in models if not any(word in model["slug"].lower() for word in tier_words)]
-        if balanced:
-            return sorted(balanced, key=lambda model: model["priority"])[0], "generic balanced-model fallback"
+                return model, "current configured model fallback"
     return sorted(models, key=lambda model: model["priority"])[0], "catalog priority fallback"
 
 
@@ -268,6 +347,20 @@ def clamp_effort(target: str, supported: list[str], current: str | None, explici
     selected = min(supported, key=lambda level: abs(EFFORTS.index(level) - target_index))
     reason = "explicit effort unsupported; closest supported effort" if explicit else "closest supported effort"
     return selected, reason
+
+
+def effort_floor(target: str, workload: str) -> str:
+    floors = {
+        "simple": "low",
+        "everyday": "medium",
+        "debugging": "high",
+        "architecture": "high",
+        "research": "medium",
+        "long_horizon": "high",
+        "high_risk": "high",
+    }
+    floor = floors[workload]
+    return EFFORTS[max(EFFORTS.index(target), EFFORTS.index(floor))]
 
 
 def build_command(model: str, effort: str, prompt: str) -> list[str]:
@@ -310,9 +403,13 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
             level = LEVELS[min(len(LEVELS) - 1, LEVELS.index(level) + 1)]
         adaptive = True
         evidence["iteration"].append("adaptive escalation threshold reached")
+    workload = args.workload or classify_workload(args.prompt, scores)
+    if adaptive and workload in {"simple", "everyday"}:
+        workload = "debugging"
+    target = effort_floor(target, workload)
     model_constraint = args.model or (current.get("model") if mode == "manual" else None)
     effort_constraint = args.effort or (current.get("model_reasoning_effort") if mode == "manual" else None)
-    model, model_reason = choose_model(models, level, current.get("model"), model_constraint)
+    model, model_reason = choose_model(models, level, current.get("model"), model_constraint, scores, workload)
     effort, effort_reason = clamp_effort(target, model.get("reasoning", []), current.get("model_reasoning_effort"), effort_constraint)
     result = {
         "task": args.prompt,
@@ -323,9 +420,12 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
         "level": level,
         "base_level": base_level,
         "score": score,
+        "workload": workload,
         "dimensions": {key: {"score": scores[key], "evidence": evidence[key]} for key in DIMENSIONS},
         "discovery": {"source": source, "degraded": degraded, "model_count": len(models)},
         "selection": {"model_reason": model_reason, "effort_reason": effort_reason},
+        "model_tier": model.get("routing_tier"),
+        "model_tier_source": model.get("routing_source"),
         "adaptive_escalation": adaptive,
         "command": build_command(model["slug"], effort, args.prompt),
         "changed_current_session": False,
@@ -348,6 +448,7 @@ def main() -> int:
     parser.add_argument("--rules")
     parser.add_argument("--signals", help="JSON object of observed runtime signals")
     parser.add_argument("--scores", help="JSON object overriding semantic dimension scores (0-5)")
+    parser.add_argument("--workload", choices=WORKLOADS, help="Explicit workload specialization")
     parser.add_argument("--model", help="Explicit model constraint")
     parser.add_argument("--effort", choices=EFFORTS, help="Explicit reasoning effort constraint")
     parser.add_argument("--json", action="store_true", dest="as_json")

@@ -16,6 +16,8 @@ AutoRoute is a routing layer for Codex coding work. Its goal is to minimize tota
 - Preserve an explicitly requested model or effort. Treat it as a user constraint and explain any incompatibility instead of silently overriding it.
 - Analyze six dimensions: complexity, scope, reasoning demand, risk, context size, and iteration horizon. Record concise evidence for each score.
 - Select model and reasoning effort independently. Choose the closest supported effort; never emit an unsupported effort.
+- With multiple models, prefer discovered capability metadata; otherwise use the conservative family defaults in `references/routing.md`. Select only models present in the discovered catalog.
+- Use workload specialization when it is explicit: long-horizon work may prefer GPT-5.2, while complex coding/debugging remains on Sol; if the specialized model is unavailable, fall back to the nearest available tier.
 - If signals show failed tests, repeated retries, cross-language changes, or a larger-than-expected diff, apply adaptive escalation and explain the trigger.
 - A Codex Skill cannot change the model of an already-running conversation. When execution is requested, use the CLI helper to start a new Codex session and make that boundary explicit.
 - If discovery fails, fall back to the current configured model and a supported/default effort, and mark the recommendation as degraded.
@@ -28,6 +30,7 @@ When Codex itself can inspect the request or repository, first make a semantic 0
 python3 scripts/autoroute.py "Add a loading state to Button"
 python3 scripts/autoroute.py --mode suggest --json "Debug intermittent React state desync"
 python3 scripts/autoroute.py --scores '{"complexity":4,"scope":3,"reasoning":5,"risk":2,"context":3,"iteration":4}' "Investigate and fix the issue"
+python3 scripts/autoroute.py --workload research "Compare these implementation options"
 python3 scripts/autoroute.py --signals '{"test_failures":2,"changed_files":14}' "Refactor the sync layer"
 python3 scripts/autoroute.py --mode auto --run "Implement the approved repository-wide migration"
 ```

@@ -2,6 +2,8 @@
   "models": [
     {"slug": "gpt-5.6-luna", "routing_tier": "low", "priority": 30, "supported_reasoning_levels": [{"effort": "none"}, {"effort": "low"}, {"effort": "medium"}]},
     {"slug": "gpt-5.6-terra", "routing_tier": "medium", "priority": 20, "supported_reasoning_levels": [{"effort": "none"}, {"effort": "low"}, {"effort": "medium"}, {"effort": "high"}]},
-    {"slug": "gpt-5.6-sol", "routing_tier": "high", "priority": 10, "supported_reasoning_levels": [{"effort": "none"}, {"effort": "low"}, {"effort": "medium"}, {"effort": "high"}, {"effort": "xhigh"}, {"effort": "max"}]}
+    {"slug": "gpt-5.6-sol", "routing_tier": "high", "priority": 10, "supported_reasoning_levels": [{"effort": "none"}, {"effort": "low"}, {"effort": "medium"}, {"effort": "high"}, {"effort": "xhigh"}, {"effort": "max"}]},
+    {"slug": "gpt-5.5", "routing_tier": "high", "priority": 40, "supported_reasoning_levels": [{"effort": "none"}, {"effort": "low"}, {"effort": "medium"}, {"effort": "high"}, {"effort": "xhigh"}]},
+    {"slug": "gpt-5.2", "routing_tier": "medium", "priority": 50, "supported_reasoning_levels": [{"effort": "none"}, {"effort": "low"}, {"effort": "medium"}, {"effort": "high"}, {"effort": "xhigh"}]}
   ]
 }
