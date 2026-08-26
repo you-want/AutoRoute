@@ -709,6 +709,8 @@ def main() -> int:
     parser.add_argument("--ttl", type=int, default=900, help="Availability cache TTL in seconds")
     parser.add_argument("--probe-timeout", type=int, default=45, help="Per-model availability probe timeout")
     args = parser.parse_args()
+    if not args.as_json and not args.list_models:
+        print(f"[AutoRoute] 分析任务中...", file=sys.stderr)
     try:
         result = route(args)
     except (ValueError, OSError) as exc:
@@ -719,7 +721,9 @@ def main() -> int:
     if args.as_json:
         print(json.dumps(result, indent=2, ensure_ascii=True))
     else:
-        print(f"AutoRoute: {result['model']} + {result['effort']} ({result['level']}, score {result['score']}/30)")
+        print(f"🎯 推荐模型: {result['model']}  |  推理强度: {result['effort']}")
+        print(f"   任务等级: {result['level']} (score {result['score']}/30, {result['workload']})")
+        print()
         print(result["note"])
         for key, value in result["dimensions"].items():
             reasons = "; ".join(value["evidence"]) or "no strong signal"
