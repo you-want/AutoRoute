@@ -85,6 +85,11 @@ def run_codex(prompt: str, model: str, effort: str, timeout: int) -> dict[str, A
                 errors.append(item.get("message", ""))
         if event.get("type") == "error":
             errors.append(event.get("message", ""))
+    if completed.returncode != 0:
+        errors.append(f"codex exited with code {completed.returncode}")
+        errors.extend(line for line in completed.stderr.splitlines() if line.strip())
+    if timed_out:
+        errors.append("codex timed out")
     return {
         "model": model,
         "effort": effort,
@@ -123,7 +128,8 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "runs": 0, "success_rate": None, "mean_quality": None,
                 "median_elapsed_seconds": None, "total_input_tokens": 0,
                 "total_cached_input_tokens": 0, "total_output_tokens": 0,
-                "total_reasoning_tokens": 0, "runs_with_errors": 0, "timeouts": 0,
+                "total_reasoning_tokens": 0, "total_elapsed_seconds": 0,
+                "uncached_input_tokens": 0, "runs_with_errors": 0, "timeouts": 0,
             }
             continue
         result[arm] = {

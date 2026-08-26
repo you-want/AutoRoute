@@ -10,6 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "autoroute.py"
 CATALOG = ROOT / "tests" / "catalog.json"
+sys.path.insert(0, str(ROOT))
+from scripts.benchmark_ab import summarize
 
 
 def run(prompt, *extra):
@@ -26,6 +28,29 @@ def run(prompt, *extra):
 
 
 def main():
+    partial_summary = summarize([{
+        "arm": "control",
+        "elapsed_seconds": 0.1,
+        "quality_score": 1.0,
+        "errors": [],
+        "timed_out": False,
+        "usage": {"input_tokens": 2, "output_tokens": 3},
+    }])
+    assert partial_summary["treatment"]["runs"] == 0, partial_summary
+    assert partial_summary["comparison"]["treatment_uncached_plus_output"] == 0, partial_summary
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as file_handle:
+        isolated_config = Path(file_handle.name)
+        json.dump({"autoroute": {"models": [{
+            "slug": "host-only", "routing_tier": "high", "supported_reasoning_levels": ["high"]
+        }]}}, file_handle)
+    try:
+        isolated = run("Add a loading state", "--config", str(isolated_config))
+        assert isolated["discovery"]["model_count"] == 5, isolated
+        assert "host-only" not in isolated["availability"]["models"], isolated
+    finally:
+        isolated_config.unlink(missing_ok=True)
+
     low = run("Add a loading state to the Button component")
     assert low["level"] == "low", low
     assert low["model"] == "gpt-5.6-luna", low
@@ -136,6 +161,8 @@ def main():
         )
         listing = json.loads(probe.stdout)
         state = json.loads(state_file.read_text(encoding="utf-8"))
+        assert listing["discovery"]["model_count"] == 2, listing
+        assert set(listing["availability"]["models"]) == {"gpt-good", "gpt-bad"}, listing
         assert state["models"]["gpt-good"]["available"] is True, state
         assert state["models"]["gpt-bad"]["available"] is False, state
         assert listing["selected"]["model"] == "gpt-good", listing

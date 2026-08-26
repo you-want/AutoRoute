@@ -176,10 +176,19 @@ def fallback_state_path() -> Path:
 
 
 def catalog_paths(config: dict[str, Any], explicit: str | None) -> list[Path]:
+    # An explicitly supplied catalog is a complete routing inventory. Mixing it
+    # with host-wide caches makes tests and custom-provider routing depend on
+    # unrelated models installed on the machine.
+    if explicit:
+        return [Path(explicit).expanduser()]
+    environment_file = os.environ.get("AUTOROUTE_MODELS_FILE")
+    if environment_file:
+        return [Path(environment_file).expanduser()]
+    configured_file = config.get("models_file")
+    if configured_file:
+        return [Path(str(configured_file)).expanduser()]
+
     paths: list[Path] = []
-    for value in (explicit, config.get("models_file"), os.environ.get("AUTOROUTE_MODELS_FILE")):
-        if value:
-            paths.append(Path(str(value)).expanduser())
     codex_home = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
     paths.extend([codex_home / "models_cache.json", codex_home / "cc-switch-model-catalog.json"])
     unique: list[Path] = []
@@ -228,7 +237,10 @@ def normalize_models(raw: Any) -> list[dict[str, Any]]:
 def discover_models(config: dict[str, Any], explicit: str | None) -> tuple[list[dict[str, Any]], str | None, bool]:
     merged: dict[str, dict[str, Any]] = {}
     sources = []
-    configured = normalize_models(config.get("models", []))
+    # A file supplied through the CLI, config, or environment is authoritative;
+    # do not silently add models from another inventory on the host.
+    catalog_override = explicit or os.environ.get("AUTOROUTE_MODELS_FILE") or config.get("models_file")
+    configured = [] if catalog_override else normalize_models(config.get("models", []))
     for model in configured:
         merged[model["slug"]] = model
     if configured:
@@ -643,7 +655,12 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
         "score": score,
         "workload": workload,
         "dimensions": {key: {"score": scores[key], "evidence": evidence[key]} for key in DIMENSIONS},
-        "discovery": {"source": source, "degraded": degraded, "model_count": len(models)},
+        "discovery": {
+            "source": source,
+            "degraded": degraded,
+            "model_count": all_discovered_models,
+            "verified_count": len(models),
+        },
         "availability": {
             "state_file": str(cache_path),
             "refreshed_at": state.get("refreshed_at") if state else None,
