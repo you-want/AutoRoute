@@ -5,3 +5,5 @@ __pycache__/
 # Local planning notes are not part of the distributable Skill.
 /dev.md
 /evals/results/
+docs/autoroute-promotion-blog.md
+docs/images/
