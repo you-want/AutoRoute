@@ -18,6 +18,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+# Allow importing session_controller when autoroute.py is run directly from
+# the scripts/ directory or installed as a package.
+try:
+    from session_controller import switch_model
+except ImportError:  # pragma: no cover
+    from scripts.session_controller import switch_model
+
 
 EFFORTS = ["none", "low", "medium", "high", "xhigh", "max", "ultra"]
 DEFAULT_WEIGHTS = {
@@ -689,6 +696,18 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def run_in_current_session(result: dict[str, Any], tty_path: str | None) -> int:
+    """Try to switch the current Codex session's model. Return 0 on success."""
+    if not switch_model(result["model"], result["effort"], tty_path):
+        print(
+            "[AutoRoute] Auto-switch failed. Start a new session with:\n"
+            + "  " + " ".join(shlex.join(c) for c in (result["command"],)),
+            file=sys.stderr,
+        )
+        return 2
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Route a coding task to a discovered Codex model and reasoning effort.")
     parser.add_argument("prompt", nargs="?", default="refresh model inventory", help="Task to analyze")
@@ -703,6 +722,8 @@ def main() -> int:
     parser.add_argument("--effort", choices=EFFORTS, help="Explicit reasoning effort constraint")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--run", action="store_true", help="Start a separate Codex process with the recommendation")
+    parser.add_argument("--session", action="store_true", help="Switch model in the currently running Codex session (requires TTY)")
+    parser.add_argument("--tty", help="Explicit TTY device path (e.g. /dev/ttys001) for --session")
     parser.add_argument("--refresh-models", action="store_true", help="Probe every discovered model now")
     parser.add_argument("--list-models", action="store_true", help="List discovered and verified models, then exit")
     parser.add_argument("--state-file", help="Availability state JSON path")
@@ -747,6 +768,8 @@ def main() -> int:
                 print(f"Selected model failed; retrying with default model {default_model}.", file=sys.stderr)
                 return subprocess.run(fallback_command).returncode
         return completed.returncode
+    if args.session:
+        return run_in_current_session(result, args.tty)
     return 0
 
 
