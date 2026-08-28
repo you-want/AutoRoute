@@ -55,10 +55,15 @@ The required entrypoint is `SKILL.md`; UI metadata is in `agents/openai.yaml`.
 
 ```bash
 python3 "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" .
-python3 tests/test_autoroute.py
+python3 -m pytest
+python3 tests/test_autoroute.py  # legacy standalone entrypoint
 python3 scripts/run_evals.py --models-file tests/catalog.json
 python3 scripts/benchmark_ab.py --output evals/results/ab-current.json
 ```
+
+Routing policy is isolated in `scripts/router_policy.py` and can be tested
+without starting subprocesses. The CLI and model discovery remain in
+`scripts/autoroute.py`; keep new pure scoring rules in the policy module.
 
 The router reads a local Codex model catalog when one is available. It also accepts any compatible catalog through `--models-file`, so the scoring and tests can be reused without publishing a user's private model list.
 

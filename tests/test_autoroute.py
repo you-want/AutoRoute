@@ -27,7 +27,7 @@ def run(prompt, *extra):
     return json.loads(result.stdout)
 
 
-def main():
+def test_cli_and_routing_end_to_end():
     partial_summary = summarize([{
         "arm": "control",
         "elapsed_seconds": 0.1,
@@ -191,8 +191,10 @@ def main():
         blocked_result = json.loads(blocked_probe.stdout)
         assert blocked_result["model"] == "gpt-good", blocked_result
         assert blocked_result["availability"]["probe_status"] == "blocked", blocked_result
-    print("autoroute tests passed")
+    # Keep the assertions in one end-to-end test for now. The next refactor
+    # can split pure routing cases from subprocess/integration cases safely.
 
 
 if __name__ == "__main__":
-    main()
+    test_cli_and_routing_end_to_end()
+    print("autoroute tests passed")

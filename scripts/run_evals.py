@@ -5,6 +5,7 @@ import argparse
 import json
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 
@@ -23,7 +24,10 @@ def main() -> int:
         if args.models_file:
             command.extend(["--models-file", args.models_file])
         command.append(case["prompt"])
-        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        result = subprocess.run(
+            command, check=True, capture_output=True, text=True,
+            env={**os.environ, "AUTOROUTE_SKIP_PROBE": "1"},
+        )
         routed = json.loads(result.stdout)
         ok = routed["level"] == case["expected_level"]
         print(f"{'PASS' if ok else 'FAIL'} {case['id']}: {routed['level']} (score {routed['score']})")
