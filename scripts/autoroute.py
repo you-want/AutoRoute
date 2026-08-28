@@ -447,7 +447,7 @@ def choose_model(models: list[dict[str, Any]], level: str, current: str | None, 
 def clamp_effort(target: str, supported: list[str], current: str | None, explicit: str | None) -> tuple[str, str]:
     if explicit:
         if not supported or explicit in supported:
-            return explicit, "explicit effort"
+            return explicit, "explicit effort" if supported else "explicit effort (support undiscovered)"
         target = explicit
     supported = [level for level in EFFORTS if level in supported]
     if not supported:
@@ -652,11 +652,17 @@ def main() -> int:
             default_model = current_codex_config().get("model")
             default_effort = current_codex_config().get("model_reasoning_effort", "high")
             if default_model and default_model != result["model"]:
+                default_entry = result["availability"].get("models", {}).get(default_model, {})
+                supported = default_entry.get("supported_efforts", []) if isinstance(default_entry, dict) else []
+                default_effort, _ = clamp_effort(default_effort, supported, default_effort, default_effort if supported else None)
                 fallback_command = build_command(default_model, default_effort, args.prompt)
                 print(f"Selected model failed; retrying with default model {default_model}.", file=sys.stderr)
                 return subprocess.run(fallback_command).returncode
         return completed.returncode
     if args.session:
+        if result["mode"] != "auto":
+            print("Refusing --session unless mode is auto.", file=sys.stderr)
+            return 2
         return run_in_current_session(result, args.tty)
     return 0
 

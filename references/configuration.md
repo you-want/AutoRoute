@@ -34,7 +34,7 @@ Model discovery checks `models_file`, `AUTOROUTE_MODELS_FILE`, the standard `~/.
 
 An explicit `autoroute.models` inventory takes precedence over cache discovery. Copy `rules/codex-models.example.json` to `~/.codex/autoroute.json` and remove models or efforts that your Codex account/provider cannot actually launch. This makes routing deterministic when the local model cache is incomplete or stale.
 
-If no explicit inventory is present, AutoRoute treats catalog tiers inferred only from model names as untrusted and keeps the current configured model. This is safer for custom providers whose model list may contain unavailable channels.
+If no explicit inventory is present, AutoRoute treats catalog tiers inferred only from model names as untrusted and keeps the current configured model when that model is present in the discovered catalog. If it is absent, routing falls back to the available catalog's workload/family and priority rules. This is safer for custom providers whose model list may contain unavailable channels.
 
 Portable catalogs may add `routing_tier`, `capability_tier`, or `quality_tier` to a model record. Accepted values are `low`, `medium`, `high`, `xhigh`, `max`, or the equivalent zero-based integer. AutoRoute prefers this metadata over guessing capability from a model name.
 

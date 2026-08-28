@@ -12,15 +12,15 @@ AutoRoute is a routing layer for Codex coding work. Its goal is to minimize tota
 ## Operating contract
 
 - Discover available models and supported reasoning levels at runtime. Do not assume that a model named in documentation or an old catalog is available to this user.
-- On first use or after the availability TTL, run the lightweight model probes and cache their results. Route only to verified models; if a selected model execution fails, retry once with the user's configured default model and effort.
-- Respect `autoroute.enabled` and `autoroute.mode` when a project or user config provides them. `manual` leaves the current Codex settings alone; `suggest` reports a recommendation; `auto` may prepare a new-session invocation.
-- Preserve an explicitly requested model or effort. Treat it as a user constraint and explain any incompatibility instead of silently overriding it.
+- On first use or after the availability TTL, run the lightweight model probes and cache their results. Route to verified models when probe results are available; if a selected model execution fails, retry once with the user's configured default model and a supported/default effort when its capabilities are known.
+- Respect `autoroute.enabled` and `autoroute.mode` when a project or user config provides them. `manual` leaves the current Codex settings alone; `suggest` reports a recommendation; `auto` may prepare a new-session invocation and, only with an explicit `--session`, switch the running session.
+- Preserve an explicitly requested model or effort. Treat it as a user constraint and explain any incompatibility instead of silently overriding it; when capability metadata is unavailable, label the effort support as undiscovered rather than verified.
 - Analyze six dimensions: complexity, scope, reasoning demand, risk, context size, and iteration horizon. Record concise evidence for each score.
-- Select model and reasoning effort independently. Choose the closest supported effort; never emit an unsupported effort.
+- Select model and reasoning effort independently. Choose the closest supported effort when the catalog exposes support; otherwise preserve the explicit/default effort and mark support as undiscovered.
 - With multiple models, prefer discovered capability metadata; otherwise use the conservative family defaults in `references/routing.md`. Select only models present in the discovered catalog.
 - Use workload specialization when it is explicit: long-horizon work may prefer GPT-5.2, while complex coding/debugging remains on Sol; if the specialized model is unavailable, fall back to the nearest available tier.
 - If signals show failed tests, repeated retries, cross-language changes, or a larger-than-expected diff, apply adaptive escalation and explain the trigger.
-- A Codex Skill cannot change the model of an already-running conversation. When execution is requested, use the CLI helper to start a new Codex session and make that boundary explicit.
+- Switching the model of an already-running conversation is possible in `auto` mode but requires explicit opt-in: run the CLI helper with `--session` (plus `--tty` if autodetection picks the wrong terminal) to send `/model` and `/effort` to the detected Codex TTY. The switch executes immediately without further confirmation, so never pass `--session` unless the user clearly asked to switch the current session. If the switch fails (e.g. no Codex TTY found), the helper prints a new-session command and exits non-zero.
 - If discovery fails, fall back to the current configured model and a supported/default effort, and mark the recommendation as degraded.
 - Keep AutoRoute state separate from `CODEX_HOME`: use the platform user cache by default, honor `AUTOROUTE_CACHE_DIR`/`cache_dir`, and fall back to a temporary cache if needed. Cache persistence must never abort routing.
 - Treat live `codex exec` probes as optional capability checks. If app-server startup is blocked by a sandbox or permissions policy, retain the discovered inventory, report `probe_status=blocked`, and route using catalog/current-model metadata instead of declaring every model unavailable.
@@ -36,6 +36,7 @@ python3 scripts/autoroute.py --scores '{"complexity":4,"scope":3,"reasoning":5,"
 python3 scripts/autoroute.py --workload research "Compare these implementation options"
 python3 scripts/autoroute.py --signals '{"test_failures":2,"changed_files":14}' "Refactor the sync layer"
 python3 scripts/autoroute.py --mode auto --run "Implement the approved repository-wide migration"
+python3 scripts/autoroute.py --mode auto --session "Debug this sync issue in the current session"
 ```
 
 Use `references/configuration.md` for config precedence, `references/routing.md` for the scoring and fallback model, and `references/evaluation.md` when measuring impact. The bundled `rules/default.json` and `evals/cases.json` are baseline, editable project resources rather than claims about any particular provider's current catalog. Do not treat a keyword match as certainty: report the evidence and use the catalog's supported capabilities as the final constraint.

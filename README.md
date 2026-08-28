@@ -61,9 +61,11 @@ python3 scripts/run_evals.py --models-file tests/catalog.json
 python3 scripts/benchmark_ab.py --output evals/results/ab-current.json
 ```
 
-Routing policy is isolated in `scripts/router_policy.py` and can be tested
-without starting subprocesses. The CLI and model discovery remain in
-`scripts/autoroute.py`; keep new pure scoring rules in the policy module.
+Routing policy is isolated in `scripts/router_policy.py`; model discovery and
+normalization live in `scripts/model_catalog.py`, availability state and
+filtering in `scripts/availability.py`, and current-session switching in
+`scripts/session.py`. These modules can be tested without starting
+subprocesses; keep new pure scoring rules in the policy module.
 
 The router reads a local Codex model catalog when one is available. It also accepts any compatible catalog through `--models-file`, so the scoring and tests can be reused without publishing a user's private model list.
 

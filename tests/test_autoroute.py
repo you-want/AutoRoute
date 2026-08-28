@@ -124,6 +124,16 @@ def test_cli_and_routing_end_to_end():
     assert explicit["model"] == "gpt-5.6-sol", explicit
     assert explicit["effort"] == "xhigh", explicit
 
+    unknown_effort = run("Add a loading state", "--model", "unknown-model", "--effort", "xhigh")
+    assert unknown_effort["effort"] == "xhigh", unknown_effort
+    assert "undiscovered" in unknown_effort["selection"]["effort_reason"], unknown_effort
+
+    session_suggest = subprocess.run(
+        [sys.executable, str(SCRIPT), "--models-file", str(CATALOG), "--mode", "suggest", "--session", "--json", "task"],
+        capture_output=True, text=True, env={**os.environ, "AUTOROUTE_SKIP_PROBE": "1"},
+    )
+    assert session_suggest.returncode == 2, session_suggest.stderr
+
     semantic = run(
         "Plan the change",
         "--scores",
