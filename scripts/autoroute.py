@@ -23,14 +23,6 @@ try:
 except ImportError:  # pragma: no cover
     from scripts.router_policy import DIMENSIONS, EFFORTS, LEVELS, DEFAULT_WEIGHTS, BANDS, analyze, band_for, classify_workload, effort_floor, task_score
 
-# Allow importing the session boundary when autoroute.py is run directly from
-# the scripts/ directory or installed as a package.
-try:
-    from session import switch_model
-except ImportError:  # pragma: no cover
-    from scripts.session import switch_model
-
-
 MODEL_FAMILY_ORDER = {
     "low": ["luna", "terra", "gpt-5.2", "gpt-5.5", "sol"],
     "medium": ["terra", "gpt-5.2", "sol", "gpt-5.5", "luna"],
@@ -580,20 +572,11 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
     elif mode == "suggest":
         result["note"] = "Suggest mode: recommendation only; no new Codex session started."
     else:
-        result["note"] = "Auto mode prepares a new-session command; use --run to execute it."
-    return result
-
-
-def run_in_current_session(result: dict[str, Any], tty_path: str | None) -> int:
-    """Try to switch the current Codex session's model. Return 0 on success."""
-    if not switch_model(result["model"], result["effort"], tty_path):
-        print(
-            "[AutoRoute] Auto-switch failed. Start a new session with:\n"
-            + "  " + " ".join(shlex.join(c) for c in (result["command"],)),
-            file=sys.stderr,
+        result["note"] = (
+            "Auto mode applies the model and reasoning effort to a new Codex process; "
+            "Codex does not expose an API for changing an already-running session."
         )
-        return 2
-    return 0
+    return result
 
 
 def main() -> int:
@@ -610,8 +593,6 @@ def main() -> int:
     parser.add_argument("--effort", choices=EFFORTS, help="Explicit reasoning effort constraint")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--run", action="store_true", help="Start a separate Codex process with the recommendation")
-    parser.add_argument("--session", action="store_true", help="Switch model in the currently running Codex session (requires TTY)")
-    parser.add_argument("--tty", help="Explicit TTY device path (e.g. /dev/ttys001) for --session")
     parser.add_argument("--refresh-models", action="store_true", help="Probe every discovered model now")
     parser.add_argument("--list-models", action="store_true", help="List discovered and verified models, then exit")
     parser.add_argument("--state-file", help="Availability state JSON path")
@@ -659,11 +640,6 @@ def main() -> int:
                 print(f"Selected model failed; retrying with default model {default_model}.", file=sys.stderr)
                 return subprocess.run(fallback_command).returncode
         return completed.returncode
-    if args.session:
-        if result["mode"] != "auto":
-            print("Refusing --session unless mode is auto.", file=sys.stderr)
-            return 2
-        return run_in_current_session(result, args.tty)
     return 0
 
 

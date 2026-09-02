@@ -1,6 +1,104 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env python3
+"""Launch Codex with a task-specific model and reasoning effort."""
 
-SKILL_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-python3 "$SKILL_DIR/scripts/autoroute.py" --list-models >/dev/null
-exec codex "$@"
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+VALUE_OPTIONS = {
+    "-C", "--cd",
+    "-a", "--ask-for-approval",
+    "-c", "--config",
+    "-i", "--image",
+    "-m", "--model",
+    "-p", "--profile",
+    "-s", "--sandbox",
+    "--add-dir",
+    "--disable",
+    "--enable",
+    "--local-provider",
+    "--remote",
+    "--remote-auth-token-env",
+}
+
+
+def config_value(value: str, key: str) -> str | None:
+    if not value.startswith(f"{key}="):
+        return None
+    result = value.split("=", 1)[1].strip()
+    if len(result) >= 2 and result[0] == result[-1] and result[0] in {'"', "'"}:
+        result = result[1:-1]
+    return result or None
+
+
+def inspect_args(argv: list[str]) -> tuple[str | None, str | None, str | None]:
+    prompt_parts: list[str] = []
+    model: str | None = None
+    effort: str | None = None
+    index = 0
+
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--":
+            prompt_parts.extend(argv[index + 1:])
+            break
+        if arg in VALUE_OPTIONS:
+            if index + 1 >= len(argv):
+                return None, None, None
+            value = argv[index + 1]
+            if arg in {"-m", "--model"}:
+                model = value
+            if arg in {"-c", "--config"}:
+                effort = config_value(value, "model_reasoning_effort") or effort
+            index += 2
+            continue
+        if arg.startswith("-"):
+            index += 1
+            continue
+        prompt_parts.append(arg)
+        index += 1
+
+    return " ".join(prompt_parts) or None, model, effort
+
+
+def route(prompt: str, model: str | None, effort: str | None) -> tuple[str | None, str | None]:
+    command = [sys.executable, str(Path(__file__).parent / "autoroute.py"), "--json", "--mode", "auto"]
+    if os.environ.get("AUTOROUTE_MODELS_FILE"):
+        command.extend(["--models-file", os.environ["AUTOROUTE_MODELS_FILE"]])
+    if model:
+        command.extend(["--model", model])
+    if effort:
+        command.extend(["--effort", effort])
+    command.append(prompt)
+
+    try:
+        completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=60)
+        result = json.loads(completed.stdout)
+        return str(result["model"]), str(result["effort"])
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None, None
+
+
+def main() -> int:
+    prompt, explicit_model, explicit_effort = inspect_args(sys.argv[1:])
+    argv = sys.argv[1:]
+
+    if prompt:
+        model, effort = route(prompt, explicit_model, explicit_effort)
+        if model and effort:
+            print(f"[AutoRoute] {model} / {effort}", file=sys.stderr)
+            argv = ["-m", model, "-c", f'model_reasoning_effort="{effort}"', *argv]
+        else:
+            print("[AutoRoute] routing unavailable; using current Codex settings", file=sys.stderr)
+
+    codex = os.environ.get("AUTOROUTE_CODEX_BIN", "codex")
+    os.execvp(codex, [codex, *argv])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

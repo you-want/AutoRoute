@@ -22,7 +22,7 @@ The JSON shape is deliberately small:
 }
 ```
 
-`mode` is one of `auto`, `suggest`, or `manual`. AutoRoute does not rewrite the user's Codex config as a side effect. `--run` is the explicit opt-in that starts a separate `codex` process with the selected model and effort.
+`mode` is one of `auto`, `suggest`, or `manual`. AutoRoute does not rewrite the user's Codex config as a side effect. The default `auto` behavior analyzes the coding task; the routed launcher applies the result when the new Codex process starts. `suggest` and `manual` never change launch settings. `--run` explicitly starts a separate `codex` process with the selected model and effort. Codex does not provide a supported API for hot-switching an already-running conversation.
 
 On first use, or when the availability cache is older than `ttl` (default 900 seconds), AutoRoute runs a minimal read-only `codex exec` probe for each discovered model and stores results in the platform user cache (`~/Library/Caches/codex` on macOS, `$XDG_CACHE_HOME/codex` or `~/.cache/codex` on Linux). It never uses `CODEX_HOME` for AutoRoute state by default. Set `AUTOROUTE_CACHE_DIR` or `autoroute.cache_dir` to override the cache directory. If the selected directory is unavailable, it falls back to the system temporary directory and continues routing. Use `--state-file` only when an exact state file path is required. Use `--refresh-models` to force a refresh, `--list-models` to inspect the state, and `--ttl 0` to probe every invocation. Set `AUTOROUTE_SKIP_PROBE=1` only for offline tests.
 

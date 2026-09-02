@@ -128,11 +128,11 @@ def test_cli_and_routing_end_to_end():
     assert unknown_effort["effort"] == "xhigh", unknown_effort
     assert "undiscovered" in unknown_effort["selection"]["effort_reason"], unknown_effort
 
-    session_suggest = subprocess.run(
+    rejected_session = subprocess.run(
         [sys.executable, str(SCRIPT), "--models-file", str(CATALOG), "--mode", "suggest", "--session", "--json", "task"],
         capture_output=True, text=True, env={**os.environ, "AUTOROUTE_SKIP_PROBE": "1"},
     )
-    assert session_suggest.returncode == 2, session_suggest.stderr
+    assert rejected_session.returncode == 2, rejected_session.stderr
 
     semantic = run(
         "Plan the change",
