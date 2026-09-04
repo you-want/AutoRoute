@@ -26,6 +26,13 @@ VALUE_OPTIONS = {
     "--remote-auth-token-env",
 }
 
+CODEX_SUBCOMMANDS = {
+    "agents", "app", "app-server", "apply", "archive", "completion", "cloud",
+    "debug", "delete", "doctor", "exec", "features", "fork", "help", "login",
+    "logout", "mcp", "mcp-server", "migrate-rollouts", "plugin", "queue", "remote-control",
+    "resume", "review", "sandbox", "unarchive", "update",
+}
+
 
 def config_value(value: str, key: str) -> str | None:
     if not value.startswith(f"{key}="):
@@ -66,6 +73,22 @@ def inspect_args(argv: list[str]) -> tuple[str | None, str | None, str | None]:
     return " ".join(prompt_parts) or None, model, effort
 
 
+def first_command_token(argv: list[str]) -> str | None:
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--":
+            return argv[index + 1] if index + 1 < len(argv) else None
+        if arg in VALUE_OPTIONS:
+            index += 2
+            continue
+        if arg.startswith("-"):
+            index += 1
+            continue
+        return arg
+    return None
+
+
 def route(prompt: str, model: str | None, effort: str | None) -> tuple[str | None, str | None]:
     command = [sys.executable, str(Path(__file__).parent / "autoroute.py"), "--json", "--mode", "auto"]
     if os.environ.get("AUTOROUTE_MODELS_FILE"):
@@ -85,8 +108,16 @@ def route(prompt: str, model: str | None, effort: str | None) -> tuple[str | Non
 
 
 def main() -> int:
-    prompt, explicit_model, explicit_effort = inspect_args(sys.argv[1:])
     argv = sys.argv[1:]
+
+    # A wrapper must not reinterpret Codex's own subcommands as natural-language
+    # prompts. This keeps `resume`, `queue`, `login`, `exec`, and help flows intact.
+    first_positional = first_command_token(argv)
+    if first_positional in CODEX_SUBCOMMANDS:
+        codex = os.environ.get("AUTOROUTE_CODEX_BIN", "codex")
+        os.execvp(codex, [codex, *argv])
+
+    prompt, explicit_model, explicit_effort = inspect_args(argv)
 
     if prompt:
         model, effort = route(prompt, explicit_model, explicit_effort)

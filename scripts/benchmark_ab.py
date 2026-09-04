@@ -30,8 +30,10 @@ def parse_json_answer(text: str) -> Any:
         raise
 
 
-def route(prompt: str, scores: dict[str, int] | None = None) -> dict[str, Any]:
+def route(prompt: str, scores: dict[str, int] | None = None, models_file: str | None = None) -> dict[str, Any]:
     command = [sys.executable, str(ROUTER), "--json"]
+    if models_file:
+        command.extend(["--models-file", models_file])
     if scores:
         command.extend(["--scores", json.dumps(scores, separators=(",", ":"))])
     command.append(prompt)
@@ -45,9 +47,9 @@ def route(prompt: str, scores: dict[str, int] | None = None) -> dict[str, Any]:
     return json.loads(completed.stdout)
 
 
-def run_codex(prompt: str, model: str, effort: str, timeout: int) -> dict[str, Any]:
+def run_codex(prompt: str, model: str, effort: str, timeout: int, codex_bin: str = "codex") -> dict[str, Any]:
     command = [
-        "codex", "exec", "--ephemeral", "--json", "--skip-git-repo-check",
+        codex_bin, "exec", "--ephemeral", "--json", "--skip-git-repo-check",
         "-C", "/tmp", "-s", "read-only", "-m", model,
         "-c", f'model_reasoning_effort="{effort}"', prompt,
     ]
@@ -120,19 +122,17 @@ def median(rows: list[dict[str, Any]], getter) -> float:
 
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    result = {}
-    for arm in ("control", "treatment"):
-        selected = [row for row in rows if row["arm"] == arm]
+    def aggregate(selected: list[dict[str, Any]]) -> dict[str, Any]:
         if not selected:
-            result[arm] = {
+            return {
                 "runs": 0, "success_rate": None, "mean_quality": None,
                 "median_elapsed_seconds": None, "total_input_tokens": 0,
                 "total_cached_input_tokens": 0, "total_output_tokens": 0,
                 "total_reasoning_tokens": 0, "total_elapsed_seconds": 0,
                 "uncached_input_tokens": 0, "runs_with_errors": 0, "timeouts": 0,
+                "quality_adjusted_cost": None,
             }
-            continue
-        result[arm] = {
+        result = {
             "runs": len(selected),
             "success_rate": round(sum(row["quality_score"] > 0 for row in selected) / len(selected), 4),
             "mean_quality": round(sum(row["quality_score"] for row in selected) / len(selected), 4),
@@ -146,6 +146,15 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "runs_with_errors": sum(bool(row["errors"]) for row in selected),
             "timeouts": sum(row["timed_out"] for row in selected),
         }
+        uncached_plus_output = result["uncached_input_tokens"] + result["total_output_tokens"]
+        total_quality = sum(row["quality_score"] for row in selected)
+        result["quality_adjusted_cost"] = round(uncached_plus_output / total_quality, 3) if total_quality else None
+        return result
+
+    result = {}
+    for arm in ("control", "treatment"):
+        selected = [row for row in rows if row["arm"] == arm]
+        result[arm] = aggregate(selected)
     control_total = result["control"]["total_input_tokens"] + result["control"]["total_output_tokens"]
     treatment_total = result["treatment"]["total_input_tokens"] + result["treatment"]["total_output_tokens"]
     result["comparison"] = {
@@ -160,6 +169,14 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     uncached_treatment = result["comparison"]["treatment_uncached_plus_output"]
     result["comparison"]["uncached_token_change"] = uncached_treatment - uncached_control
     result["comparison"]["uncached_token_change_percent"] = round((uncached_treatment - uncached_control) / uncached_control * 100, 3) if uncached_control else None
+    classes = sorted({row.get("task_class", "uncategorized") for row in rows})
+    result["by_class"] = {
+        task_class: {
+            arm: aggregate([row for row in rows if row.get("task_class", "uncategorized") == task_class and row["arm"] == arm])
+            for arm in ("control", "treatment")
+        }
+        for task_class in classes
+    }
     return result
 
 
@@ -167,15 +184,26 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tasks", default=str(DEFAULT_TASKS))
     parser.add_argument("--output")
-    parser.add_argument("--model", default="gpt-5.6-sol")
+    parser.add_argument("--model", "--control-model", dest="model", default="gpt-5.6-sol", help="Control-arm model")
     parser.add_argument("--control-effort", default="high")
+    parser.add_argument("--models-file", help="Authoritative model catalog passed to AutoRoute")
+    parser.add_argument("--codex-bin", default="codex", help="Codex executable used for real runs")
     parser.add_argument("--timeout", type=int, default=240)
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--min-per-class", type=int, default=0, help="Require at least N tasks per class before running")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     tasks = json.loads(Path(args.tasks).read_text(encoding="utf-8"))
     if args.limit:
         tasks = tasks[: args.limit]
+    if args.min_per_class:
+        counts = {}
+        for task in tasks:
+            counts[task.get("class", "uncategorized")] = counts.get(task.get("class", "uncategorized"), 0) + 1
+        insufficient = {name: count for name, count in counts.items() if count < args.min_per_class}
+        if insufficient:
+            print(f"Need at least {args.min_per_class} tasks per class; got {insufficient}.", file=sys.stderr)
+            return 2
     output = Path(args.output) if args.output else ROOT / "evals" / "results" / f"ab-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -184,7 +212,7 @@ def main() -> int:
         rows = previous.get("runs", [])
     completed_keys = {(row["task_id"], row["arm"]) for row in rows}
     for index, task in enumerate(tasks):
-        recommendation = route(task["prompt"], task.get("scores"))
+        recommendation = route(task["prompt"], task.get("scores"), args.models_file)
         arms = [
             ("control", args.model, args.control_effort),
             ("treatment", recommendation["model"], recommendation["effort"]),
@@ -196,7 +224,7 @@ def main() -> int:
                 print(f"SKIP {task['id']} {arm} already completed", flush=True)
                 continue
             print(f"START {task['id']} {arm} {model}+{effort}", flush=True)
-            result = run_codex(task["prompt"], model, effort, args.timeout)
+            result = run_codex(task["prompt"], model, effort, args.timeout, args.codex_bin)
             result.update({
                 "task_id": task["id"], "task_class": task["class"], "arm": arm,
                 "quality_score": score(result, task["expected"]),
@@ -214,6 +242,9 @@ def main() -> int:
         "created_at": datetime.now(timezone.utc).isoformat(),
         "codex_model": args.model,
         "control_effort": args.control_effort,
+        "codex_bin": args.codex_bin,
+        "models_file": args.models_file,
+        "min_per_class": args.min_per_class,
         "runs": rows,
         "summary": summarize(rows),
     }

@@ -24,3 +24,8 @@ def test_score_bands_and_workload_floors():
 def test_invalid_score_override_is_rejected():
     with pytest.raises(ValueError, match="from 0 to 5"):
         analyze("Plan", {}, {"risk": 6})
+
+
+def test_workload_auto_is_inferable_and_explicit_workloads_remain_supported():
+    assert classify_workload("Compare implementation options", {}) == "research"
+    assert classify_workload("Implement a settings form", {}) == "everyday"

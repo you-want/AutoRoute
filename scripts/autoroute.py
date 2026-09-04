@@ -19,6 +19,11 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from session_controller import current_thread_id, queue_model_switch, switch_command
+except ImportError:  # pragma: no cover
+    from scripts.session_controller import current_thread_id, queue_model_switch, switch_command
+
+try:
     from router_policy import DIMENSIONS, EFFORTS, LEVELS, DEFAULT_WEIGHTS, BANDS, analyze, band_for, classify_workload, effort_floor, task_score
 except ImportError:  # pragma: no cover
     from scripts.router_policy import DIMENSIONS, EFFORTS, LEVELS, DEFAULT_WEIGHTS, BANDS, analyze, band_for, classify_workload, effort_floor, task_score
@@ -31,6 +36,7 @@ MODEL_FAMILY_ORDER = {
     "max": ["sol", "gpt-5.5", "gpt-5.2", "terra", "luna"],
 }
 WORKLOADS = ["simple", "everyday", "debugging", "architecture", "research", "long_horizon", "high_risk"]
+WORKLOAD_CHOICES = ["auto", *WORKLOADS]
 
 
 def normalize_tier(value: Any) -> str | None:
@@ -106,6 +112,8 @@ def load_config(path_arg: str | None) -> dict[str, Any]:
     if os.environ.get("AUTOROUTE_MODE"):
         config["mode"] = os.environ["AUTOROUTE_MODE"].lower()
     config["mode"] = config.get("mode", "auto") if config.get("mode") in {"auto", "suggest", "manual"} else "auto"
+    if config.get("workload") not in WORKLOAD_CHOICES:
+        config["workload"] = "auto"
     return config
 
 
@@ -454,6 +462,21 @@ def build_command(model: str, effort: str, prompt: str) -> list[str]:
     return [os.environ.get("AUTOROUTE_CODEX_BIN", "codex"), "-m", model, "-c", f'model_reasoning_effort="{effort}"', prompt]
 
 
+def executable_available(executable: str) -> bool:
+    if os.sep in executable:
+        return os.path.isfile(executable) and os.access(executable, os.X_OK)
+    return shutil.which(executable) is not None
+
+
+def continuation_message(result: dict[str, Any]) -> str:
+    """Make the queued turn explicit while relying on the thread's history."""
+    return (
+        "继续处理当前任务。AutoRoute 已根据当前任务建议切换到 "
+        f"{result['model']} / {result['effort']}。保留并使用本会话已有的全部上下文、"
+        "仓库状态和此前结论，从当前进度继续，不要重新开始。"
+    )
+
+
 # Keep the CLI's historical function surface while delegating catalog and cache
 # responsibilities to focused modules.
 try:
@@ -523,9 +546,14 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
             level = LEVELS[min(len(LEVELS) - 1, LEVELS.index(level) + 1)]
         adaptive = True
         evidence["iteration"].append("adaptive escalation threshold reached")
-    workload = args.workload or classify_workload(args.prompt, scores)
+    requested_workload = args.workload or config.get("workload", "auto")
+    workload = requested_workload if requested_workload != "auto" else classify_workload(args.prompt, scores)
+    workload_source = "cli" if args.workload and args.workload != "auto" else (
+        "config" if config.get("workload") and config.get("workload") != "auto" and not args.workload else "inferred"
+    )
     if adaptive and workload in {"simple", "everyday"}:
         workload = "debugging"
+        workload_source = "adaptive"
     target = effort_floor(target, workload)
     model_constraint = args.model or (current.get("model") if mode == "manual" else None)
     effort_constraint = args.effort or (current.get("model_reasoning_effort") if mode == "manual" else None)
@@ -541,6 +569,7 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
         "base_level": base_level,
         "score": score,
         "workload": workload,
+        "workload_source": workload_source,
         "dimensions": {key: {"score": scores[key], "evidence": evidence[key]} for key in DIMENSIONS},
         "discovery": {
             "source": source,
@@ -566,17 +595,28 @@ def route(args: argparse.Namespace) -> dict[str, Any]:
         "adaptive_escalation": adaptive,
         "command": build_command(model["slug"], effort, args.prompt),
         "changed_current_session": False,
+        "session": {
+            "thread_id": current_thread_id(),
+            "switch_available": bool(current_thread_id()),
+            "switch_command": None,
+        },
     }
     if mode == "manual":
         result["note"] = "Manual mode: current Codex settings are untouched."
     elif mode == "suggest":
-        result["note"] = "Suggest mode: recommendation only; no new Codex session started."
+        result["note"] = "Suggest mode: recommendation only until the user chooses whether to switch or continue."
     else:
         result["note"] = (
-            "Auto mode applies the model and reasoning effort to a new Codex process; "
-            "Codex does not expose an API for changing an already-running session."
+            "Auto mode applies the model and reasoning effort when launching or explicitly "
+            "queueing work; the existing thread can be continued without losing its history."
         )
+    result["session"]["switch_command"] = queue_switch_preview(result)
     return result
+
+
+def queue_switch_preview(result: dict[str, Any]) -> list[str] | None:
+    """Expose the exact current-thread action without executing it."""
+    return switch_command(result["model"], result["effort"], continuation_message(result))
 
 
 def main() -> int:
@@ -588,23 +628,35 @@ def main() -> int:
     parser.add_argument("--rules")
     parser.add_argument("--signals", help="JSON object of observed runtime signals")
     parser.add_argument("--scores", help="JSON object overriding semantic dimension scores (0-5)")
-    parser.add_argument("--workload", choices=WORKLOADS, help="Explicit workload specialization")
+    parser.add_argument("--workload", choices=WORKLOAD_CHOICES, help="Workload specialization; auto infers it from the task")
     parser.add_argument("--model", help="Explicit model constraint")
     parser.add_argument("--effort", choices=EFFORTS, help="Explicit reasoning effort constraint")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--run", action="store_true", help="Start a separate Codex process with the recommendation")
+    parser.add_argument("--session", action="store_true", help="Queue a model switch and continuation on the current Codex thread")
     parser.add_argument("--refresh-models", action="store_true", help="Probe every discovered model now")
     parser.add_argument("--list-models", action="store_true", help="List discovered and verified models, then exit")
     parser.add_argument("--state-file", help="Availability state JSON path")
     parser.add_argument("--ttl", type=int, default=900, help="Availability cache TTL in seconds")
     parser.add_argument("--probe-timeout", type=int, default=45, help="Per-model availability probe timeout")
     args = parser.parse_args()
+    if args.run and args.session:
+        parser.error("--run and --session are mutually exclusive")
     if not args.as_json and not args.list_models:
         print(f"[AutoRoute] 分析任务中...", file=sys.stderr)
     try:
         result = route(args)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
+    if args.session:
+        ok, command, error = queue_model_switch(result["model"], result["effort"], continuation_message(result))
+        result["session"]["switch_command"] = command or result["session"].get("switch_command")
+        result["session"]["switch_queued"] = ok
+        result["session"]["error"] = error
+        result["changed_current_session"] = ok
+        if not ok:
+            print(f"[AutoRoute] 无法切换当前会话: {error}", file=sys.stderr)
+            return 2
     if args.list_models:
         print(json.dumps({"discovery": result["discovery"], "availability": result["availability"], "selected": {"model": result["model"], "effort": result["effort"]}}, indent=2))
         return 0
@@ -620,12 +672,19 @@ def main() -> int:
             print(f"- {key}: {value['score']}/5 ({reasons})")
         print(f"Discovery: {result['discovery']['source'] or 'fallback'}")
         print("Command: " + shlex.join(result["command"]))
+        if result["session"].get("switch_available"):
+            print()
+            print("选择下一步：")
+            print(f"1. 切换到 {result['model']} / {result['effort']} 并继续（保留当前 thread 上下文）")
+            print("2. 保持当前模型继续")
+            print("确认选择 1 后执行：python3 scripts/autoroute.py --session " + shlex.quote(args.prompt))
     if args.run:
         if result["mode"] != "auto":
             print("Refusing --run unless mode is auto.", file=sys.stderr)
             return 2
-        if not shutil.which("codex"):
-            print("codex executable not found; command was printed but not run.", file=sys.stderr)
+        executable = result["command"][0]
+        if not executable_available(executable):
+            print(f"{executable} executable not found; command was printed but not run.", file=sys.stderr)
             return 2
         completed = subprocess.run(result["command"])
         if completed.returncode != 0:

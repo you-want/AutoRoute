@@ -71,7 +71,22 @@ def test_cli_and_routing_end_to_end():
 
     inferred_everyday = run("Implement a settings form with validation")
     assert inferred_everyday["workload"] == "everyday", inferred_everyday
+    assert inferred_everyday["workload_source"] == "inferred", inferred_everyday
     assert inferred_everyday["model"] == "gpt-5.6-terra", inferred_everyday
+
+    explicit_workload = run("Implement a settings form with validation", "--workload", "research")
+    assert explicit_workload["workload"] == "research", explicit_workload
+    assert explicit_workload["workload_source"] == "cli", explicit_workload
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as file_handle:
+        workload_config = Path(file_handle.name)
+        json.dump({"autoroute": {"workload": "architecture"}}, file_handle)
+    try:
+        configured_workload = run("Implement a settings form with validation", "--config", str(workload_config))
+        assert configured_workload["workload"] == "architecture", configured_workload
+        assert configured_workload["workload_source"] == "config", configured_workload
+    finally:
+        workload_config.unlink(missing_ok=True)
 
     long_horizon = run(
         "Design a multi-quarter repository modernization roadmap",
@@ -130,7 +145,8 @@ def test_cli_and_routing_end_to_end():
 
     rejected_session = subprocess.run(
         [sys.executable, str(SCRIPT), "--models-file", str(CATALOG), "--mode", "suggest", "--session", "--json", "task"],
-        capture_output=True, text=True, env={**os.environ, "AUTOROUTE_SKIP_PROBE": "1"},
+        capture_output=True, text=True,
+        env={**os.environ, "AUTOROUTE_SKIP_PROBE": "1", "CODEX_THREAD_ID": "", "CODEX_SESSION_ID": ""},
     )
     assert rejected_session.returncode == 2, rejected_session.stderr
 

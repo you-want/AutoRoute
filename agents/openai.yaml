@@ -1,6 +1,6 @@
 interface:
   display_name: "AutoRoute"
   short_description: "Route coding tasks to the right model"
-  default_prompt: "Use $autoroute to analyze this coding task and provide or launch the selected model and reasoning effort."
+  default_prompt: "Use $autoroute to analyze this coding task, recommend a model, then let me choose whether to switch on the current thread with its existing context or continue with the current model."
 policy:
   allow_implicit_invocation: true

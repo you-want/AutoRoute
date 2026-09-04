@@ -16,13 +16,16 @@ The JSON shape is deliberately small:
   "autoroute": {
     "enabled": true,
     "mode": "suggest",
+    "workload": "auto",
     "models_file": "/path/to/model-catalog.json",
     "models": []
   }
 }
 ```
 
-`mode` is one of `auto`, `suggest`, or `manual`. AutoRoute does not rewrite the user's Codex config as a side effect. The default `auto` behavior analyzes the coding task; the routed launcher applies the result when the new Codex process starts. `suggest` and `manual` never change launch settings. `--run` explicitly starts a separate `codex` process with the selected model and effort. Codex does not provide a supported API for hot-switching an already-running conversation.
+`mode` is one of `auto`, `suggest`, or `manual`. AutoRoute does not rewrite the user's Codex config as a side effect. The default `auto` behavior analyzes the coding task; the routed launcher applies the result when the new Codex process starts. `suggest` and `manual` do not switch automatically, but an explicit `--session` action after user confirmation queues the next turn on the current thread with the selected model and effort. `--run` explicitly starts a separate `codex` process. The queued session action requires `CODEX_THREAD_ID` (or `CODEX_SESSION_ID`) and preserves the existing thread history.
+
+`workload` is one of `auto`, `simple`, `everyday`, `debugging`, `architecture`, `research`, `long_horizon`, or `high_risk`. `auto` infers the workload from the prompt and semantic scores. A CLI `--workload` value takes precedence over configuration; otherwise `autoroute.workload` takes precedence over inference. When adaptive escalation is triggered by failures, retries, or unexpectedly broad changes, a `simple`/`everyday` workload may be upgraded to `debugging`. JSON output records the final workload and its `workload_source` (`cli`, `config`, `inferred`, or `adaptive`).
 
 On first use, or when the availability cache is older than `ttl` (default 900 seconds), AutoRoute runs a minimal read-only `codex exec` probe for each discovered model and stores results in the platform user cache (`~/Library/Caches/codex` on macOS, `$XDG_CACHE_HOME/codex` or `~/.cache/codex` on Linux). It never uses `CODEX_HOME` for AutoRoute state by default. Set `AUTOROUTE_CACHE_DIR` or `autoroute.cache_dir` to override the cache directory. If the selected directory is unavailable, it falls back to the system temporary directory and continues routing. Use `--state-file` only when an exact state file path is required. Use `--refresh-models` to force a refresh, `--list-models` to inspect the state, and `--ttl 0` to probe every invocation. Set `AUTOROUTE_SKIP_PROBE=1` only for offline tests.
 
